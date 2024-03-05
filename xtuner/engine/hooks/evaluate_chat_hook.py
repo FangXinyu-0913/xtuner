@@ -7,7 +7,7 @@ from mmengine.model import is_model_wrapper
 from mmengine.utils.misc import get_object_from_string
 from transformers import GenerationConfig, StoppingCriteriaList
 
-from xtuner.dataset.utils import expand2square, load_image
+from xtuner.dataset.utils import expand2square, load_image, load_and_transform_video, get_video_transform
 from xtuner.model.utils import prepare_inputs_labels_for_multimodal
 from xtuner.registry import BUILDER
 from xtuner.utils import (DEFAULT_IMAGE_TOKEN, IMAGE_TOKEN_INDEX,
@@ -21,6 +21,8 @@ class EvaluateChatHook(Hook):
                  evaluation_inputs,
                  evaluation_images=None,
                  image_processor=None,
+                 evaluation_videos=None,
+                 evaluation_inputs_video=None,
                  system='',
                  prompt_template=None,
                  every_n_iters=None,
@@ -42,6 +44,27 @@ class EvaluateChatHook(Hook):
             self.evaluation_images = [
                 load_image(img) for img in self.evaluation_images
             ]
+        #video input preprocess
+        self.evaluation_inputs_video = evaluation_inputs_video
+        if isinstance(self.evaluation_inputs_video, str):
+            self.evaluation_inputs_video = [self.evaluation_inputs_video]
+        self.evaluation_videos = evaluation_videos
+        if isinstance(self.evaluation_videos, str):
+            self.evaluation_videos = [self.evaluation_videos]
+        if self.evaluation_videos is not None:
+            assert len(
+                self.evaluation_videos) in [1, len(self.evaluation_inputs_video)]
+            if len(self.evaluation_videos) == 1:
+                self.evaluation_videos = [self.evaluation_videos[0]] * len(
+                    self.evaluation_inputs_video)
+            video_decode_backend = 'decord'
+            num_frames = 10
+            self.evaluation_videos = [
+                load_and_transform_video(video, get_video_transform(video_decode_backend=video_decode_backend,num_frames=num_frames),
+                                                video_decode_backend=video_decode_backend,
+                                                num_frames=num_frames) for video in self.evaluation_videos
+            ]
+        ##video loading finish
         if prompt_template is None:
             instruction = '{input}'
         else:
@@ -99,6 +122,7 @@ class EvaluateChatHook(Hook):
         model.activation_checkpointing_disable()
         model.llm.config.use_cache = True
         model.eval()
+        print(self.evaluation_images, self.evaluation_inputs)
         if self.evaluation_images is not None:
             for sample_image, sample_input in zip(self.evaluation_images,
                                                   self.evaluation_inputs):
@@ -127,8 +151,10 @@ class EvaluateChatHook(Hook):
                     if idx != len(chunk_encode) - 1:
                         input_ids.append(IMAGE_TOKEN_INDEX)
                 input_ids = torch.tensor(input_ids).to(device)
+                
                 visual_outputs = model.visual_encoder(
                     image.unsqueeze(0), output_hidden_states=True)
+
                 pixel_values = model.projector(visual_outputs.hidden_states[
                     model.visual_select_layer][:, 1:])
 
@@ -161,6 +187,58 @@ class EvaluateChatHook(Hook):
                 runner.logger.info(
                     f'Sample output:\n'
                     f'{self.tokenizer.decode(generation_output[0])}\n')
+
+
+        if self.evaluation_videos is not None:
+            for sample_video, sample_video_input in zip(self.evaluation_videos,
+                                                  self.evaluation_inputs_video):
+                # image = expand2square(
+                #     sample_image,
+                #     tuple(
+                #         int(x * 255) for x in self.image_processor.image_mean))
+                # image = self.image_processor.preprocess(
+                #     image, return_tensors='pt')['pixel_values'][0]
+                # image = image.to(device)
+                sample_input = DEFAULT_IMAGE_TOKEN + '\n' + sample_video_input
+                inputs = (self.system + self.instruction).format(
+                    input=sample_input, round=1, **runner.cfg)
+                chunk_encode = []
+                for idx, chunk in enumerate(inputs.split(DEFAULT_IMAGE_TOKEN)):
+                    if idx == 0:
+                        cur_encode = self.tokenizer.encode(chunk)
+                    else:
+                        cur_encode = self.tokenizer.encode(
+                            chunk, add_special_tokens=False)
+                    chunk_encode.append(cur_encode)
+                assert len(chunk_encode) == 2
+                input_ids = []
+                for idx, cur_chunk_encode in enumerate(chunk_encode):
+                    input_ids.extend(cur_chunk_encode)
+                    if idx != len(chunk_encode) - 1:
+                        input_ids.append(IMAGE_TOKEN_INDEX)
+                input_ids = torch.tensor(input_ids).to(device)
+                sample_video = sample_video.permute(1,0,2,3).to(device)
+                visual_outputs = model.visual_encoder(
+                    sample_video, output_hidden_states=True)
+                pixel_values = model.projector(visual_outputs.hidden_states[
+                    model.visual_select_layer][:, 1:])
+
+                mm_inputs = prepare_inputs_labels_for_multimodal(
+                    llm=model.llm,
+                    input_ids=input_ids.unsqueeze(0),
+                    pixel_values=pixel_values,
+                    instance_list=['video'])
+
+                generation_output = model.generate(
+                    **mm_inputs,
+                    max_new_tokens=max_new_tokens,
+                    generation_config=self.gen_config,
+                    bos_token_id=self.tokenizer.bos_token_id,
+                    stopping_criteria=self.stop_criteria)
+                runner.logger.info(
+                    f'Sample output:\n'
+                    f'{inputs + self.tokenizer.decode(generation_output[0])}\n'
+                )
 
         # Cast to training mode
         if is_checkpointing:

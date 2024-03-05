@@ -3,7 +3,7 @@ from typing import Dict, Sequence
 
 import torch
 from torch.nn.utils.rnn import pad_sequence
-
+from einops import rearrange
 from xtuner.utils import DEFAULT_PAD_TOKEN_INDEX, IGNORE_INDEX
 
 
@@ -13,14 +13,27 @@ def default_collate_fn(
         return_hf_format: bool = False) -> Dict[str, torch.Tensor]:
     input_ids = []
     labels = []
-    has_image = any(inst.get('pixel_values') is not None for inst in instances)
-    if has_image:
+
+    has_image = any(inst.get('image_pixel_values') is not None for inst in instances)
+    has_video = any(inst.get('video_pixel_values') is not None for inst in instances)
+    if has_image or has_video:
         pixel_values = []
+        instances_type = []
     for example in instances:
+        # print(example)
+        # print(len(instances),has_image,has_video)
         input_ids.append(torch.tensor(example['input_ids']))
         labels.append(torch.tensor(example['labels']))
-        if has_image:
-            pixel_values.append(example['pixel_values'])
+        if has_image and 'image_pixel_values' in example.keys():
+            pixel_values.append(example['image_pixel_values'])
+            instances_type.append('image')
+        elif has_video and 'video_pixel_values' in example.keys():
+            c,b,h,w = example['video_pixel_values'].shape
+            video_pixel_values = example['video_pixel_values'].reshape(b,c,h,w)
+            pixel_values.extend([video_pixel_values[i] for i in range(video_pixel_values.size(0))])
+            instances_type.append('video')
+    if has_image or has_video:
+        print(instances_type)
     if len(instances) > 1:
         input_ids = pad_sequence(
             input_ids, batch_first=True, padding_value=pad_index)
@@ -35,9 +48,10 @@ def default_collate_fn(
         'attention_mask': input_ids.ne(pad_index),
         'labels': labels
     }
-    if has_image:
+    if has_image or has_video:
         pixel_values = torch.stack(pixel_values)
         data_dict['pixel_values'] = pixel_values
+        data_dict['instance_type'] = instances_type
 
     if return_hf_format:
         return data_dict

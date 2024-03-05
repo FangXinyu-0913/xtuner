@@ -13,6 +13,17 @@ from .utils import (LoadWoInit, find_all_linear_names,
                     make_inputs_require_grad,
                     prepare_inputs_labels_for_multimodal, traverse_dict)
 
+class CompressNet(nn.Module):
+    def __init__(self, input_size):
+        super(CompressNet, self).__init__()
+        self.global_avg_pool = nn.AdaptiveAvgPool2d((input_size[1], input_size[2]))
+
+    def forward(self, x):
+        # 假设 x 的形状是 [N, 20, A, B]
+        # 在第一个维度上应用全局平均池化
+        x = self.global_avg_pool(x)
+        # 输出的形状是 [N, 1, A, B]
+        return x
 
 class LLaVAModel(BaseModel):
 
@@ -84,6 +95,8 @@ class LLaVAModel(BaseModel):
         self.visual_select_layer = visual_select_layer
 
         self._is_init = True
+
+        self.video_compress = CompressNet([20,336,336])
 
     def _parse_lora_config(self, lora_config):
         if isinstance(lora_config, dict) or isinstance(
@@ -168,12 +181,21 @@ class LLaVAModel(BaseModel):
 
     def forward(self, data, data_samples=None, mode='loss'):
         if 'pixel_values' in data:
+
+            # print(data['pixel_values'].shape, data['instance_type'])
             visual_outputs = self.visual_encoder(
                 data['pixel_values'], output_hidden_states=True)
+            
             pixel_values = self.projector(
                 visual_outputs.hidden_states[self.visual_select_layer][:, 1:])
+            instance_type = data['instance_type']
+            # if 'video' in instance_type:
+            #     print(f'after projection, pixel value shape: {pixel_values.shape}, instance list {instance_type}')
+
             data['pixel_values'] = pixel_values
-            data = prepare_inputs_labels_for_multimodal(llm=self.llm, **data)
+            # for item in data['instance_type']:
+            del data['instance_type']
+            data = prepare_inputs_labels_for_multimodal(llm=self.llm, instance_list=instance_type, **data)
 
         if mode == 'loss':
             return self.compute_loss(data, data_samples)
@@ -196,6 +218,7 @@ class LLaVAModel(BaseModel):
         return logits_dict
 
     def compute_loss(self, data, data_samples=None):
+        # print(data)
         outputs = self.llm(**data)
         loss_dict = {'loss': outputs.loss}
         return loss_dict

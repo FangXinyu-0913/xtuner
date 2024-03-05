@@ -8,8 +8,8 @@ from mmengine.utils.misc import get_object_from_string
 from peft import PeftType
 from torch import nn
 from transformers import PreTrainedModel
-
-from xtuner.utils import IGNORE_INDEX, IMAGE_TOKEN_INDEX
+from torch import tensor
+from xtuner.utils import IGNORE_INDEX, IMAGE_TOKEN_INDEX, VIDEO_TOKEN_INDEX
 
 
 def set_obj_dtype(d):
@@ -129,6 +129,7 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name='default'):
 # Modified from https://github.com/haotian-liu/LLaVA/blob/82fc5e0e5f4393a4c26851fa32c69ab37ea3b146/llava/model/llava_arch.py#L99  # noqa: E501
 def prepare_inputs_labels_for_multimodal(
         llm: PreTrainedModel,
+        instance_list: List[str] = ['image'],
         input_ids: torch.LongTensor = None,
         position_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
@@ -171,9 +172,16 @@ def prepare_inputs_labels_for_multimodal(
     new_inputs_embeds = []
     new_labels = []
     cur_image_idx = 0
-    for batch_idx, cur_input_ids in enumerate(input_ids):
+    for batch_idx, (cur_input_ids, instance) in enumerate(zip(input_ids,instance_list)):
         num_images = (cur_input_ids == IMAGE_TOKEN_INDEX).sum()
-        if num_images == 0:
+        if instance == 'video':
+            num_videos = 1
+            num_images = 0
+        else:
+            num_videos = 0
+        #num_videos = # (cur_input_ids == VIDEO_TOKEN_INDEX).sum() 
+        # print(f'image num {num_images}, video num {num_videos}')
+        if num_images == 0 and num_videos == 0:
             cur_pixel_values = pixel_values[cur_image_idx]
             cur_inputs_embeds_1 = llm.get_input_embeddings()(cur_input_ids)
             cur_inputs_embeds = torch.cat(
@@ -183,39 +191,89 @@ def prepare_inputs_labels_for_multimodal(
             cur_image_idx += 1
             continue
 
-        image_token_indices = [-1] + torch.where(
-            cur_input_ids == IMAGE_TOKEN_INDEX)[0].tolist() + [
-                cur_input_ids.shape[0]
-            ]
-        cur_input_ids_noim = []
-        cur_labels = labels[batch_idx]
-        cur_labels_noim = []
-        for i in range(len(image_token_indices) - 1):
-            cur_input_ids_noim.append(cur_input_ids[image_token_indices[i] +
-                                                    1:image_token_indices[i +
-                                                                          1]])
-            cur_labels_noim.append(cur_labels[image_token_indices[i] +
-                                              1:image_token_indices[i + 1]])
-        split_sizes = [x.shape[0] for x in cur_labels_noim]
-        cur_inputs_embeds = llm.get_input_embeddings()(
-            torch.cat(cur_input_ids_noim))
-        cur_inputs_embeds_no_im = torch.split(
-            cur_inputs_embeds, split_sizes, dim=0)
-        cur_new_inputs_embeds = []
-        cur_new_labels = []
+        
+        if num_videos > 0:
+            video_token_indices =  [-1] + torch.where(       #[-1, 4, cur_input_ids.shape[0]]
+                cur_input_ids == IMAGE_TOKEN_INDEX)[0].tolist() + [
+                    cur_input_ids.shape[0]
+                ]
+            if len(video_token_indices) == 2:
+                video_token_indices = [-1, 4, cur_input_ids.shape[0]]
+            # print(f'video_token_indices:',video_token_indices)
+            # import ipdb
+            # ipdb.set_trace()
+            cur_input_ids_noim = []
+            cur_labels = labels[batch_idx]
+            cur_labels_noim = []
+            for i in range(len(video_token_indices) - 1):
+                cur_input_ids_noim.append(cur_input_ids[video_token_indices[i] +
+                                                        1:video_token_indices[i +
+                                                                            1]])
+                cur_labels_noim.append(cur_labels[video_token_indices[i] +
+                                                1:video_token_indices[i + 1]])
+            # print(cur_input_ids_noim, cur_labels_noim)
+            split_sizes = [x.shape[0] for x in cur_labels_noim]
+            cur_inputs_embeds = llm.get_input_embeddings()(
+                torch.cat(cur_input_ids_noim))
+            cur_inputs_embeds_no_im = torch.split(
+                cur_inputs_embeds, split_sizes, dim=0)
+            # print(cur_inputs_embeds.shape, cur_inputs_embeds_no_im)
+            cur_new_inputs_embeds = []
+            cur_new_labels = []
 
-        for i in range(num_images + 1):
-            cur_new_inputs_embeds.append(cur_inputs_embeds_no_im[i])
-            cur_new_labels.append(cur_labels_noim[i])
-            if i < num_images:
-                cur_pixel_values = pixel_values[cur_image_idx]
-                cur_image_idx += 1
-                cur_new_inputs_embeds.append(cur_pixel_values)
-                cur_new_labels.append(
-                    torch.full((cur_pixel_values.shape[0], ),
-                               IGNORE_INDEX,
-                               device=cur_labels.device,
-                               dtype=cur_labels.dtype))
+            for i in range(num_videos + 1):
+                cur_new_inputs_embeds.append(cur_inputs_embeds_no_im[i])
+                cur_new_labels.append(cur_labels_noim[i])
+                if i < num_videos:
+                    cur_pixel_values = pixel_values[cur_image_idx: cur_image_idx + 10]
+                    cur_image_idx += 10
+                    for item in cur_pixel_values:
+                        #VIDEO Squeeze to IMAGE
+                        cur_new_inputs_embeds.append(item) #check here
+                        cur_new_labels.append(
+                            torch.full((item.shape[0], ),
+                                    IGNORE_INDEX,
+                                    device=cur_labels.device,
+                                    dtype=cur_labels.dtype))
+        
+        if num_images > 0:
+            # import ipdb
+            # ipdb.set_trace()
+            image_token_indices = [-1] + torch.where(
+                cur_input_ids == IMAGE_TOKEN_INDEX)[0].tolist() + [
+                    cur_input_ids.shape[0]
+                ]
+            # print(f'image token indices: {image_token_indices}, {cur_input_ids.shape[0]}')
+            cur_input_ids_noim = []
+            cur_labels = labels[batch_idx]
+            cur_labels_noim = []
+            for i in range(len(image_token_indices) - 1):
+                cur_input_ids_noim.append(cur_input_ids[image_token_indices[i] +
+                                                        1:image_token_indices[i +
+                                                                            1]])
+                cur_labels_noim.append(cur_labels[image_token_indices[i] +
+                                                1:image_token_indices[i + 1]])
+            split_sizes = [x.shape[0] for x in cur_labels_noim]
+            cur_inputs_embeds = llm.get_input_embeddings()(
+                torch.cat(cur_input_ids_noim))
+            cur_inputs_embeds_no_im = torch.split(
+                cur_inputs_embeds, split_sizes, dim=0)
+            cur_new_inputs_embeds = []
+            cur_new_labels = []
+
+            for i in range(num_images + 1):
+                cur_new_inputs_embeds.append(cur_inputs_embeds_no_im[i])
+                cur_new_labels.append(cur_labels_noim[i])
+                if i < num_images:
+                    cur_pixel_values = pixel_values[cur_image_idx]
+                    print(f'pixel shape: {cur_pixel_values.shape}')
+                    cur_image_idx += 1
+                    cur_new_inputs_embeds.append(cur_pixel_values)
+                    cur_new_labels.append(
+                        torch.full((cur_pixel_values.shape[0], ),
+                                IGNORE_INDEX,
+                                device=cur_labels.device,
+                                dtype=cur_labels.dtype))
 
         cur_new_inputs_embeds = torch.cat(cur_new_inputs_embeds)
         cur_new_labels = torch.cat(cur_new_labels)
@@ -271,7 +329,11 @@ def prepare_inputs_labels_for_multimodal(
 
     if _position_ids is None:
         position_ids = None
-
+    # try:
+    #     print(new_inputs_embeds.shape, new_labels.shape)
+    # except:
+    #     print('get failure')
+    print(new_inputs_embeds.shape)
     return {
         'input_ids': None,
         'position_ids': position_ids,

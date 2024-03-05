@@ -69,6 +69,14 @@ def process(dataset,
         if isinstance(dataset, DatasetDict):
             dataset = dataset[split]
 
+    image_count = 0
+    video_count = 0
+    for item in dataset:
+        if 'image' in item.keys() and item['image'] != '':
+            image_count+=1
+        if 'video' in item.keys() and item['video'] != '':
+            video_count+=1
+    print(f'after split-image {image_count}, video {video_count}')
     # sample `max_dataset_length` items from the original dataset to
     # save time consumed by map function
     if max_dataset_length is not None:
@@ -76,6 +84,15 @@ def process(dataset,
         indices = np.random.choice(
             len(dataset), max_dataset_length, replace=False)
         dataset = dataset.select(indices)
+
+    # image_count = 0
+    # video_count = 0
+    # for item in dataset:
+    #     if 'image' in item.keys():
+    #         image_count+=1
+    #     if 'video' in item.keys():
+    #         video_count+=1
+    # print(f'after select-image {image_count}, video {video_count}')
 
     # Extract the useful data for training from the original dataset.
     if dataset_map_fn is not None:
@@ -91,6 +108,15 @@ def process(dataset,
 
         dataset = dataset.map(dataset_map_fn, num_proc=map_num_proc)
 
+    image_count = 0
+    video_count = 0
+    for item in dataset:
+        if 'image' in item.keys() and item['image'] != '':
+            image_count+=1
+        if 'video' in item.keys() and item['video'] != '':
+            video_count+=1
+    print(f'after map-image {image_count}, video {video_count}')
+
     # Add prompt template, such as <|System|>: xxx <|User|>: xxx <|Bot|>: xxx
     if template_map_fn is not None:
         if isinstance(template_map_fn, dict) or isinstance(
@@ -99,8 +125,26 @@ def process(dataset,
             template_map_fn = BUILDER.build(template_map_fn)
         dataset = dataset.map(template_map_fn, num_proc=map_num_proc)
 
+    image_count = 0
+    video_count = 0
+    for item in dataset:
+        if 'image' in item.keys() and item['image'] != '':
+            image_count+=1
+        if 'video' in item.keys() and item['video'] != '':
+            video_count+=1
+    print(f'after template-image {image_count}, video {video_count}')
+
     for old, new in rename_maps:
         dataset = dataset.rename_column(old, new)
+
+    image_count = 0
+    video_count = 0
+    for item in dataset:
+        if 'image' in item.keys() and item['image'] != '':
+            image_count+=1
+        if 'video' in item.keys() and item['video'] != '':
+            video_count+=1
+    print(f'after rename-image {image_count}, video {video_count}')
 
     # remove unused columns
     if pack_to_max_length and (not remove_unused_columns):
@@ -110,11 +154,29 @@ def process(dataset,
             logger='current',
             level=logging.WARNING)
         remove_unused_columns = True
+    
+    image_count = 0
+    video_count = 0
+    for item in dataset:
+        if 'image' in item.keys() and item['image'] != '':
+            image_count+=1
+        if 'video' in item.keys() and item['video'] != '':
+            video_count+=1
+    print(f'after remove unused col-image {image_count}, video {video_count}')
 
     # remove invalid data
     dataset = dataset.filter(
         lambda example: len(example['conversation']) > 0,
         num_proc=map_num_proc)
+
+    image_count = 0
+    video_count = 0
+    for item in dataset:
+        if 'image' in item.keys() and item['image'] != '':
+            image_count+=1
+        if 'video' in item.keys() and item['video'] != '':
+            video_count+=1
+    print(f'after invalid data-image {image_count}, video {video_count}')
 
     # tokenize
     if isinstance(tokenizer, dict) or isinstance(
@@ -130,12 +192,31 @@ def process(dataset,
         remove_columns=list(dataset.column_names)
         if remove_unused_columns else None,
         num_proc=map_num_proc)
+    
+    image_count = 0
+    video_count = 0
+    for item in dataset:
+        if 'image' in item.keys() and item['image'] != '':
+            image_count+=1
+        if 'video' in item.keys() and item['video'] != '':
+            video_count+=1
+    print(f'after tokenize-image {image_count}, video {video_count}')
 
     if input_ids_with_output:
         # remove data that does not have the valid labels.
         dataset = dataset.filter(
             lambda example: any(label >= 0 for label in example['labels']),
             num_proc=map_num_proc)
+        
+        image_count = 0
+        video_count = 0
+        for item in dataset:
+            if 'image' in item.keys():
+                image_count+=1
+            if 'video' in item.keys():
+                video_count+=1
+        # this changed
+        print(f'after input_ids_with_output filter-image {image_count}, video {video_count}')
 
     # pack to max length
     if pack_to_max_length and split == 'train':
@@ -144,21 +225,44 @@ def process(dataset,
             dataset = dataset.flatten_indices(num_proc=map_num_proc)
         dataset = dataset.map(
             Packer(max_length), batched=True, num_proc=map_num_proc)
+        
+        image_count = 0
+        video_count = 0
+        for item in dataset:
+            if 'image' in item.keys():
+                image_count+=1
+            if 'video' in item.keys():
+                video_count+=1
+        print(f'after pack to max length filter-image {image_count}, video {video_count}')
+        
 
     # add 'length'
     setattr(dataset, 'length', [len(i['input_ids']) for i in dataset])
-
+  
     return dataset
 
 
-def process_hf_dataset(*args, **kwargs):
-    if not (dist.is_available() and dist.is_initialized()):
-        return process(*args, **kwargs)
+# def process_hf_dataset(*args, **kwargs):
+#     if not (dist.is_available() and dist.is_initialized()):
+#         return process(*args, **kwargs)
 
-    if dist.get_rank() == 0:
-        dataset = process(*args, **kwargs)
-        objects = [dataset]
+#     if dist.get_rank() == 0:
+#         dataset = process(*args, **kwargs)
+#         objects = [dataset]
+#     else:
+#         objects = [None]
+#     dist.broadcast_object_list(objects, src=0)
+#     return objects[0]
+
+def process_hf_dataset(broadcast_from_master=True, *args, **kwargs):
+    if broadcast_from_master and dist.is_available() and dist.is_initialized():
+        if dist.get_rank() == 0:
+            dataset = process(*args, **kwargs)
+            objects = [dataset]
+        else:
+            objects = [None]
+        dist.broadcast_object_list(objects, src=0)
+        dataset = objects[0]
     else:
-        objects = [None]
-    dist.broadcast_object_list(objects, src=0)
-    return objects[0]
+        dataset = process(*args, **kwargs)
+    return dataset

@@ -122,3 +122,8 @@ work_dirs/
 # srun
 *.out
 batchscript-*
+core.*
+*.safetenors
+*.bin
+0226-qlora-result/*
+0302-qlora-result/*
