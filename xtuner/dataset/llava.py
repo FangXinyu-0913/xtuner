@@ -89,11 +89,12 @@ class LLaVADataset(Dataset):
             self.video_processor = video_processor
         self.pad_image_to_square = pad_image_to_square
 
-        self.batched_data = self.get_batched_mix_image_video()
+        self.batched_data = self.get_batched_image_OR_video()
         print('batched_data shape:',len(self.batched_data))
 
     def get_batched_mix_image_video(self):
-        #TODO: check this function, hard to see image in a batb
+        #one batch might be: [image, image, video, video] or [image, ..., image] or [video, video, video, video]
+        #mix video and image
         #adopt to self.remix_batch_size
         batched_data = []
         image_data = []
@@ -140,7 +141,43 @@ class LLaVADataset(Dataset):
         if self.shuffle_dataset:    
             random.shuffle(batched_data)
 
-        return batched_data    
+        return batched_data
+
+    def get_batched_image_OR_video(self):
+        #one batch might be: [image, ..., image] or [video, video, video, video]
+        #mix video and image
+        #adopt to self.remix_batch_size
+        batched_data = []
+        image_data = []
+        video_data = []
+        
+        for item in self.text_data:
+            if item.get('image', None) is not None and item['image'] != '':
+                image_data.append(item)
+            elif item.get('video', None) is not None and item['video'] != '':
+                video_data.append(item)
+            else:
+                image_data.append(item)
+        if self.shuffle_dataset:
+            random.shuffle(image_data)
+            random.shuffle(video_data)
+
+        print(f'image data {len(image_data)}, video data {len(video_data)}\n')
+
+        for i in range(0, len(image_data), self.image_batch_size):
+            batched_item = image_data[i:i+self.image_batch_size]
+            batched_data.append(batched_item)
+        print(f'finish add image data')
+        
+        for i in range(0, len(video_data), self.video_batch_size):
+            batched_item = video_data[i:i+self.video_batch_size]
+            batched_data.append(batched_item)
+        print(f'finish add video data')
+
+        if self.shuffle_dataset:    
+            random.shuffle(batched_data)
+
+        return batched_data
 
     @property
     def modality_length(self):
@@ -162,7 +199,6 @@ class LLaVADataset(Dataset):
         for idx, (data_dict) in enumerate(batched_item):
             try:
                 if data_dict.get('image', None) is not None and data_dict['image'] != '':
-                    
                     image_file = data_dict['image']
                     # print('image:', image_file)
                     image = Image.open(os.path.join(self.image_folder,
