@@ -9,9 +9,7 @@ from torch.utils.data import Sampler
 
 
 def get_length_grouped_indices(lengths, group_batch_size, generator=None):
-    print(f'group_batch_size {group_batch_size}')
-    print(f'len(lengths) {len(lengths)}')
-    print(f'lengths {lengths}')
+
     def process(lengths, group_batch_size, generator=None):
         indices = torch.randperm(len(lengths), generator=generator)
         megabatches = [
@@ -43,8 +41,6 @@ def get_length_grouped_indices(lengths, group_batch_size, generator=None):
                 lang_lengths, group_batch_size, generator=generator):
             lang_megabatches.append([lang_indices[i] for i in lang_megabatch])
 
-        print(f'mm_megabatches: {mm_megabatches}')
-        print(f'lang_megabatches: {lang_megabatches}')
         last_mm = mm_megabatches[-1]
         last_lang = lang_megabatches[-1]
         last_batch = last_mm + last_lang
@@ -73,7 +69,7 @@ def get_length_grouped_indices(lengths, group_batch_size, generator=None):
     return [i for megabatch in megabatches for i in megabatch]
 
 
-class LengthGroupedSampler(Sampler):
+class EasySampler(Sampler):
 
     def __init__(self,
                  dataset: Sized,
@@ -82,11 +78,9 @@ class LengthGroupedSampler(Sampler):
                  mega_batch_mult: Optional[int] = None,
                  seed: Optional[int] = None,
                  round_up: bool = True) -> None:
-        
         rank, world_size = get_dist_info()
         self.rank = rank
         self.world_size = world_size
-        print(f"rk,wz: {rank},{world_size}")
 
         self.dataset = dataset
         if seed is None:
@@ -94,12 +88,10 @@ class LengthGroupedSampler(Sampler):
         self.seed = seed
         self.epoch = 0
         self.round_up = round_up
-        print(f'seed: {self.seed}, len(dataset): {len(self.dataset)}')
 
         if self.round_up:
             num_iters = math.ceil(
                 len(self.dataset) / world_size / per_device_batch_size)
-            print(f'num_iter:{num_iters}')
             self.num_samples = num_iters * per_device_batch_size
             self.total_size = self.num_samples * self.world_size
         else:
@@ -116,7 +108,6 @@ class LengthGroupedSampler(Sampler):
             # Just in case, for tiny datasets
             if mega_batch_mult == 0:
                 mega_batch_mult = 1
-        print(f'mega_batch_mult:{mega_batch_mult}')
         self.group_batch_size = mega_batch_mult * total_batch_size
 
         if isinstance(self.dataset, TorchConcatDataset):
@@ -129,29 +120,11 @@ class LengthGroupedSampler(Sampler):
         assert isinstance(self.length, (list, tuple))
 
         self.total_batch_size = total_batch_size
-        
 
     def __iter__(self) -> Iterator[int]:
         """Iterate the indices."""
-        generator = torch.Generator()
-        generator.manual_seed(self.seed + self.epoch)
-        indices = get_length_grouped_indices(
-            lengths=self.length,
-            group_batch_size=self.group_batch_size,
-            generator=generator)
-        assert len(set(indices)) == len(indices)
-        print(len(indices))
-        # add extra samples to make it evenly divisible
-        if self.round_up:
-            indices = (
-                indices *
-                int(self.total_size / len(indices) + 1))[:self.total_size]
-        # subsample
-        assert len(indices) == self.total_size
-        indices = indices[self.rank:self.total_size:self.world_size]
-        assert len(indices) == self.num_samples
-        print(f'self.num_samples:{self.num_samples}, self.total_size {self.total_size}, self.length {len(self.length)}, self.group_batch_size: {self.group_batch_size}')
-        print(f'self.round_up:{self.round_up}, indices: {indices} {iter(indices)}, len(indices): {len(indices)}, ')
+        dataset_length = len(self.dataset)
+        indices = list(range(dataset_length))
         return iter(indices)
 
     def __len__(self) -> int:

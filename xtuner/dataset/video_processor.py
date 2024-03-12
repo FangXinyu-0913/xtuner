@@ -25,7 +25,7 @@ def make_list_of_images(x):
 
 def get_video_transform(config):
     config = config.vision_config
-    config.num_frames = 20 #original 8, newly added
+    config.num_frames = 10 #original 8, newly added
     if config.video_decode_backend == 'pytorchvideo':
         transform = ApplyTransformToKey(
             key="video",
@@ -78,7 +78,7 @@ def load_and_transform_video(
         clip_end_sec=None,
         num_frames=8,
 ):
-    num_frames = 20
+    
     if video_decode_backend == 'pytorchvideo':
         #  decord pyav
         video = EncodedVideo.from_path(video_path, decoder="decord", decode_audio=False)
@@ -143,7 +143,7 @@ class LanguageBindVideoProcessor(ProcessorMixin):
             image_features = [self.image_processor(image, self.transform,
                                                    video_decode_backend=self.config.vision_config.video_decode_backend,
                                                 #    num_frames=self.config.vision_config.num_frames) for image in images]
-                                                   num_frames=20) for image in images]
+                                                   num_frames=10) for image in images]
 
             # image_features = [torch.rand(3, 8, 224, 224) for image in images]
             image_features = torch.stack(image_features)

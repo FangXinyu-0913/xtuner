@@ -10,9 +10,9 @@ from transformers import (AutoModelForCausalLM, AutoTokenizer,
                           CLIPVisionModel)
 
 from xtuner.dataset import LLaVADataset, LanguageBindVideoProcessor
-from xtuner.dataset.collate_fns import default_collate_fn
+from xtuner.dataset.collate_fns import default_collate_fn, video_collate_fn
 from xtuner.dataset.map_fns import llava_map_fn, template_map_fn_factory
-from xtuner.dataset.samplers import LengthGroupedSampler
+from xtuner.dataset.samplers import LengthGroupedSampler, EasySampler
 from xtuner.engine import DatasetInfoHook, EvaluateChatHook
 from xtuner.model import LLaVAModel
 from xtuner.utils import PROMPT_TEMPLATE
@@ -30,13 +30,13 @@ pretrained_pth = '/cpfs01/user/fangxinyu/work_dirs/epoch_1.pth'  # noqa: E501
 # data_root = './data/llava_data/'
 data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/llava_image_tune/llava_v1_5_mix665k.json' #image_path
 image_folder = '/cpfs01/user/fangxinyu/Video-LLaVA/data'
-video_data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/videochatgpt_llavaimage_tune_sampledMinor.json'
+video_data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/videochatgpt_llavaimage_tune_modify_shuffle.json'
 video_folder = '/cpfs01/user/fangxinyu/Video-LLaVA/data'
 prompt_template = PROMPT_TEMPLATE.internlm2_chat
 max_length = int(2048 - (336 / 14)**2) #text max length, the same with previous situation
 
 # Scheduler & Optimizer
-batch_size = 4  # per_device
+batch_size = 1  # per_device
 accumulative_counts = 1
 dataloader_num_workers = 0
 max_epochs = 1
@@ -126,10 +126,10 @@ train_dataloader = dict(
     num_workers=dataloader_num_workers,
     dataset=llava_dataset,
     sampler=dict(
-        type=LengthGroupedSampler,
+        type=EasySampler,
         length_property='modality_length',
         per_device_batch_size=batch_size * accumulative_counts),
-    collate_fn=dict(type=default_collate_fn))
+    collate_fn=dict(type=video_collate_fn))
 
 #######################################################################
 #                    PART 4  Scheduler & Optimizer                    #

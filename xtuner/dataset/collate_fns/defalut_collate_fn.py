@@ -24,7 +24,6 @@ def default_collate_fn(instances: Sequence[Dict],
         assert not (has_image or has_video), 'Currently, it is not configured to '
         'accommodate the use of varlen Attention in multimodal training'
 
-    
     if has_image or has_video:
         pixel_values = []
         instances_type = []
