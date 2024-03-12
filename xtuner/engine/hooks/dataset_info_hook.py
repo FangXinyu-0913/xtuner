@@ -27,17 +27,18 @@ class DatasetInfoHook(Hook):
     def log(self, runner, dataset, mode='train'):
         runner.logger.info(f'Num {mode} samples {len(dataset)}')
         runner.logger.info(f'{mode} example:')
-        input_ids = dataset[0]['input_ids']
-        if self.is_intern_repo_dataset:
-            input_ids = [abs(x) for x in input_ids]
-        # Try to split list to be compatible with IMAGE token
-        input_ids = split_list(input_ids, IMAGE_TOKEN_INDEX)
-        text = ''
-        for idx, ids in enumerate(input_ids):
-            text += self.tokenizer.decode(ids)
-            if idx != len(input_ids) - 1:
-                text += DEFAULT_IMAGE_TOKEN
-        runner.logger.info(text)
+        # # print(dataset[0])
+        # input_ids = dataset[0]['input_ids']
+        # if self.is_intern_repo_dataset:
+        #     input_ids = [abs(x) for x in input_ids]
+        # # Try to split list to be compatible with IMAGE token
+        # input_ids = split_list(input_ids, IMAGE_TOKEN_INDEX)
+        # text = ''
+        # for idx, ids in enumerate(input_ids):
+        #     text += self.tokenizer.decode(ids)
+        #     if idx != len(input_ids) - 1:
+        #         text += DEFAULT_IMAGE_TOKEN
+        # runner.logger.info(text)
 
     def before_train(self, runner) -> None:
         do_train = runner.train_loop is not None

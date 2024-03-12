@@ -352,8 +352,10 @@ def load_and_transform_video(
         decord.bridge.set_bridge('torch')
         decord_vr = VideoReader(video_path, ctx=cpu(0))
         duration = len(decord_vr)
+        # print(duration)
         frame_id_list = np.linspace(0, duration-1, num_frames, dtype=int)
         video_data = decord_vr.get_batch(frame_id_list)
+        # print(f'path:{video_path}, {video_data.shape}')
         video_data = video_data.permute(3, 0, 1, 2)  # (T, H, W, C) -> (C, T, H, W)
         video_outputs = transform(video_data)
 
