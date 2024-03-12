@@ -12,6 +12,7 @@ from .moss_sft import MOSSSFTDataset
 from .refcoco_json import (InvRefCOCOJsonDataset, RefCOCOJsonDataset,
                            RefCOCOJsonEvalDataset)
 from .utils import decode_base64_to_image, expand2square, load_image
+from .video_processor import LanguageBindVideoProcessor
 
 # ignore FutureWarning in hf datasets
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -32,4 +33,5 @@ __all__ = [
     'RefCOCOJsonDataset',
     'RefCOCOJsonEvalDataset',
     'InvRefCOCOJsonDataset',
+    'LanguageBindVideoProcessor',
 ]

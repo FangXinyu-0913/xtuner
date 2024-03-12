@@ -266,7 +266,7 @@ def prepare_inputs_labels_for_multimodal(
                 cur_new_labels.append(cur_labels_noim[i])
                 if i < num_images:
                     cur_pixel_values = pixel_values[cur_image_idx]
-                    print(f'pixel shape: {cur_pixel_values.shape}')
+                    # print(f'pixel shape: {cur_pixel_values.shape}')
                     cur_image_idx += 1
                     cur_new_inputs_embeds.append(cur_pixel_values)
                     cur_new_labels.append(
@@ -333,7 +333,7 @@ def prepare_inputs_labels_for_multimodal(
     #     print(new_inputs_embeds.shape, new_labels.shape)
     # except:
     #     print('get failure')
-    print(new_inputs_embeds.shape)
+    # print(new_inputs_embeds.shape)
     return {
         'input_ids': None,
         'position_ids': position_ids,
