@@ -1,110 +1,48 @@
-# Multi-turn Conversation Example 1
-
-> \[!IMPORTANT\]
-> Data must be used in conjunction with the corresponding map_fn.
-
-## Data
-
-`./data.json`
-
-```json
-[{
-    "messages":[
-        {
-            "toy_system": "You are a helpful AI assistant.",
-            "toy_input": "Give three tips for staying healthy.",
-            "toy_output": "1.Eat a balanced diet. 2. Exercise regularly. 3. Get enough sleep."
-        },
-        {
-            "toy_input": "How to study English?",
-            "toy_output": "1. Set clear goals. 2. Create a study plan. 3. Build vocabulary. 4. Practice speaking."
-        }
-    ]
-},
-{
-    "messages":[
-        {
-            "toy_system": "You are a helpful AI assistant.",
-            "toy_input": "How to study English?",
-            "toy_output": "1. Set clear goals. 2. Create a study plan. 3. Build vocabulary. 4. Practice speaking."
-        },
-        {
-            "toy_input": "Give three tips for staying healthy.",
-            "toy_output": "1.Eat a balanced diet. 2. Exercise regularly. 3. Get enough sleep."
-        }
-    ]
-}]
-```
-
-## Map Function
-
-`./map_fn.py`
-
-```python
-def multi_turn_1_map_fn(example):
-    messages = example['messages']
-    conversation = []
-    for msg in messages:
-        conversation.append({
-            'system': msg['toy_system'],
-            'input': msg['toy_input'],
-            'output': msg['output']
-        })
-    return {'conversation': conversation}
-```
-
-## Config
-
-Based on [internlm_7b_qlora_json_e3](../../../xtuner/configs/internlm/internlm_7b/internlm_7b_qlora_json_e3.py).
-
-```diff
 # Copyright (c) OpenMMLab. All rights reserved.
 import torch
-from datasets import load_dataset
-+ from mmengine.config import read_base
-from mmengine.dataset import DefaultSampler
 from mmengine.hooks import (CheckpointHook, DistSamplerSeedHook, IterTimerHook,
                             LoggerHook, ParamSchedulerHook)
-from mmengine.optim import AmpOptimWrapper, CosineAnnealingLR
-from peft import LoraConfig
+from mmengine.optim import AmpOptimWrapper, CosineAnnealingLR, LinearLR
 from torch.optim import AdamW
 from transformers import (AutoModelForCausalLM, AutoTokenizer,
-                          BitsAndBytesConfig)
+                          CLIPImageProcessor, CLIPVisionModel)
 
-from xtuner.dataset import process_hf_dataset
+from xtuner.dataset import LLaVADataset
 from xtuner.dataset.collate_fns import default_collate_fn
-from xtuner.dataset.map_fns import template_map_fn_factory
+from xtuner.dataset.map_fns import llava_map_fn, template_map_fn_factory
+from xtuner.dataset.samplers import LengthGroupedSampler
 from xtuner.engine.hooks import DatasetInfoHook, EvaluateChatHook
 from xtuner.engine.runner import TrainLoop
-from xtuner.model import SupervisedFinetune
+from xtuner.model import LLaVAModel
 from xtuner.utils import PROMPT_TEMPLATE
 
-+with read_base():
-+    from .map_fn import multi_turn_1_map_fn as dataset_map_fn
-+
 #######################################################################
 #                          PART 1  Settings                           #
 #######################################################################
 # Model
-pretrained_model_name_or_path = 'internlm/internlm-7b'
+llm_name_or_path = 'internlm/internlm2-chat-1_8b'
+visual_encoder_name_or_path = 'openai/clip-vit-large-patch14-336'
+# Specify the pretrained pth
+pretrained_pth = './work_dirs/llava_internlm2_chat_1_8b_clip_vit_large_p14_336_e1_gpu8_pretrain/iter_2181.pth'  # noqa: E501
 
 # Data
--data_path = 'path/to/your/json_data'
-+data_path = './data.json'
-prompt_template = PROMPT_TEMPLATE.default
-max_length = 2048
-pack_to_max_length = True
+data_root = './data/llava_data/'
+data_path = data_root + 'LLaVA-Instruct-150K/llava_v1_5_mix665k.json'
+image_folder = data_root + 'llava_images'
+prompt_template = PROMPT_TEMPLATE.internlm2_chat
+max_length = int(2048 - (336 / 14)**2)
 
 # Scheduler & Optimizer
-batch_size = 1  # per_device
-accumulative_counts = 16
+batch_size = 16  # per_device
+accumulative_counts = 1
 dataloader_num_workers = 0
-max_epochs = 3
+max_epochs = 1
 optim_type = AdamW
-lr = 2e-4
+lr = 2e-5
 betas = (0.9, 0.999)
 weight_decay = 0
 max_norm = 1  # grad clip
+warmup_ratio = 0.03
 
 # Save
 save_steps = 500
@@ -113,64 +51,60 @@ save_total_limit = 2  # Maximum checkpoints to keep (-1 means unlimited)
 # Evaluate the generation performance during the training
 evaluation_freq = 500
 SYSTEM = ''
-evaluation_inputs = [
-    '请给我介绍五个上海的景点', 'Please tell me five scenic spots in Shanghai'
-]
+evaluation_images = 'https://llava-vl.github.io/static/images/view.jpg'
+evaluation_inputs = ['请描述一下这张照片', 'Please describe this picture']
 
 #######################################################################
-#                      PART 2  Model & Tokenizer                      #
+#            PART 2  Model & Tokenizer & Image Processor              #
 #######################################################################
 tokenizer = dict(
     type=AutoTokenizer.from_pretrained,
-    pretrained_model_name_or_path=pretrained_model_name_or_path,
+    pretrained_model_name_or_path=llm_name_or_path,
     trust_remote_code=True,
     padding_side='right')
 
+image_processor = dict(
+    type=CLIPImageProcessor.from_pretrained,
+    pretrained_model_name_or_path=visual_encoder_name_or_path,
+    trust_remote_code=True)
+
 model = dict(
-    type=SupervisedFinetune,
+    type=LLaVAModel,
+    freeze_llm=False,
+    freeze_visual_encoder=True,
+    pretrained_pth=pretrained_pth,
     llm=dict(
         type=AutoModelForCausalLM.from_pretrained,
-        pretrained_model_name_or_path=pretrained_model_name_or_path,
+        pretrained_model_name_or_path=llm_name_or_path,
         trust_remote_code=True,
-        torch_dtype=torch.float16,
-        quantization_config=dict(
-            type=BitsAndBytesConfig,
-            load_in_4bit=True,
-            load_in_8bit=False,
-            llm_int8_threshold=6.0,
-            llm_int8_has_fp16_weight=False,
-            bnb_4bit_compute_dtype=torch.float16,
-            bnb_4bit_use_double_quant=True,
-            bnb_4bit_quant_type='nf4')),
-    lora=dict(
-        type=LoraConfig,
-        r=64,
-        lora_alpha=16,
-        lora_dropout=0.1,
-        bias='none',
-        task_type='CAUSAL_LM'))
+        torch_dtype=torch.float32),
+    visual_encoder=dict(
+        type=CLIPVisionModel.from_pretrained,
+        pretrained_model_name_or_path=visual_encoder_name_or_path))
 
 #######################################################################
 #                      PART 3  Dataset & Dataloader                   #
 #######################################################################
-train_dataset = dict(
-    type=process_hf_dataset,
-    dataset=dict(
-        type=load_dataset, path='json', data_files=dict(train=data_path)),
+llava_dataset = dict(
+    type=LLaVADataset,
+    data_path=data_path,
+    image_folder=image_folder,
     tokenizer=tokenizer,
-    max_length=max_length,
-+   dataset_map_fn=dataset_map_fn,
+    image_processor=image_processor,
+    dataset_map_fn=llava_map_fn,
     template_map_fn=dict(
         type=template_map_fn_factory, template=prompt_template),
-    remove_unused_columns=True,
-    shuffle_before_pack=True,
-    pack_to_max_length=pack_to_max_length)
+    max_length=max_length,
+    pad_image_to_square=True)
 
 train_dataloader = dict(
     batch_size=batch_size,
     num_workers=dataloader_num_workers,
-    dataset=train_dataset,
-    sampler=dict(type=DefaultSampler, shuffle=True),
+    dataset=llava_dataset,
+    sampler=dict(
+        type=LengthGroupedSampler,
+        length_property='modality_length',
+        per_device_batch_size=batch_size * accumulative_counts),
     collate_fn=dict(type=default_collate_fn))
 
 #######################################################################
@@ -188,12 +122,22 @@ optim_wrapper = dict(
 
 # learning policy
 # More information: https://github.com/open-mmlab/mmengine/blob/main/docs/en/tutorials/param_scheduler.md  # noqa: E501
-param_scheduler = dict(
-    type=CosineAnnealingLR,
-    eta_min=0.0,
-    by_epoch=True,
-    end=max_epochs,
-    convert_to_iter_based=True)
+param_scheduler = [
+    dict(
+        type=LinearLR,
+        start_factor=1e-5,
+        by_epoch=True,
+        begin=0,
+        end=warmup_ratio * max_epochs,
+        convert_to_iter_based=True),
+    dict(
+        type=CosineAnnealingLR,
+        eta_min=0.0,
+        by_epoch=True,
+        begin=warmup_ratio * max_epochs,
+        end=max_epochs,
+        convert_to_iter_based=True)
+]
 
 # train, val, test setting
 train_cfg = dict(type=TrainLoop, max_epochs=max_epochs)
@@ -207,8 +151,10 @@ custom_hooks = [
     dict(
         type=EvaluateChatHook,
         tokenizer=tokenizer,
+        image_processor=image_processor,
         every_n_iters=evaluation_freq,
         evaluation_inputs=evaluation_inputs,
+        evaluation_images=evaluation_images,
         system=SYSTEM,
         prompt_template=prompt_template)
 ]
@@ -258,11 +204,3 @@ randomness = dict(seed=None, deterministic=False)
 
 # set log processor
 log_processor = dict(by_epoch=False)
-```
-
-## Quick Start
-
-```bash
-cd ./examples/demo_data/multi_turn_1
-xtuner train config.py
-```
