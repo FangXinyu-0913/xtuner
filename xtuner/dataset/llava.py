@@ -1,11 +1,13 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import json
 import os
+from typing import Iterator, Optional, Sized
 
 import torch
 from datasets import Dataset as HFDataset
 from datasets import DatasetDict
 from mmengine.config import Config, ConfigDict
+from mmengine.dist import sync_random_seed
 from PIL import Image
 import numpy as np
 import cv2
@@ -16,6 +18,7 @@ from torch.utils.data import Dataset
 from xtuner.registry import BUILDER
 from .huggingface import process_hf_dataset
 from .utils import expand2square, load_and_transform_video, get_video_transform
+import copy
 
 
 class LLaVADataset(Dataset):
@@ -27,20 +30,28 @@ class LLaVADataset(Dataset):
                  video_folder,
                  tokenizer,
                  image_processor,
-                 video_processor,
                  max_dataset_length=None,
                  dataset_map_fn=None,
                  template_map_fn=None,
                  max_length=2048,
+                 video_frames=8,
+                 video_batch_size=4,
+                 image_batch_size=20,
                  pad_image_to_square=False,
-                 shuffle_dataset=True):
+                 shuffle_dataset=True,
+                 seed: Optional[int] = None):
         super().__init__()
 
         # json_data = json.load(open(data_path))
         json_video_data = json.load(open(video_data_path))
+        if seed is None:
+            seed = sync_random_seed()
+        self.seed = seed
         self.shuffle_dataset = shuffle_dataset
-        self.video_batch_size = 4
-        self.image_batch_size = 20
+        
+        self.num_frames = video_frames
+        self.video_batch_size = video_batch_size
+        self.image_batch_size = image_batch_size
         self.remix_batch_size = {'image_num': 2, 'video_num': 2}
         image_count = 0
         video_count = 0
@@ -81,12 +92,7 @@ class LLaVADataset(Dataset):
         else:
             self.image_processor = image_processor
 
-        if isinstance(video_processor, dict) or isinstance(
-                video_processor, Config) or isinstance(video_processor,
-                                                       ConfigDict):
-            self.video_processor = BUILDER.build(video_processor)
-        else:
-            self.video_processor = video_processor
+
         self.pad_image_to_square = pad_image_to_square
 
         self.batched_data = self.get_batched_image_OR_video()
@@ -99,6 +105,7 @@ class LLaVADataset(Dataset):
         batched_data = []
         image_data = []
         video_data = []
+        random.seed(self.seed)
         
         for item in self.text_data:
             if item.get('image', None) is not None and item['image'] != '':
@@ -150,6 +157,7 @@ class LLaVADataset(Dataset):
         batched_data = []
         image_data = []
         video_data = []
+        random.seed(self.seed)
         
         for item in self.text_data:
             if item.get('image', None) is not None and item['image'] != '':
@@ -195,8 +203,9 @@ class LLaVADataset(Dataset):
     def __getitem__(self, index):
 
         batched_item = self.batched_data[index]
+        copyed_batched_item = copy.deepcopy(batched_item)
         index_list = list(range(len(batched_item)))
-        for idx, (data_dict) in enumerate(batched_item):
+        for idx, (data_dict) in enumerate(copyed_batched_item):
             try:
                 if data_dict.get('image', None) is not None and data_dict['image'] != '':
                     image_file = data_dict['image']
@@ -210,17 +219,17 @@ class LLaVADataset(Dataset):
                                 int(x * 255) for x in self.image_processor.image_mean))
                     image = self.image_processor.preprocess(
                         image, return_tensors='pt')['pixel_values'][0]
-                    data_dict['image_pixel_values'] = image
+                    data_dict['image_pixel_values'] = image #might cause OOM 
                     # print(f'success get image')
                 elif data_dict.get('video', None) is not None and data_dict['video'] != '':
                     video_file = data_dict['video']
                     # print('video:', video_file)
                     video_decode_backend = 'decord'
-                    num_frames = 10
+                    
                     video = load_and_transform_video(os.path.join(self.video_folder, video_file), 
-                                                    get_video_transform(video_decode_backend=video_decode_backend,num_frames=num_frames),
+                                                    get_video_transform(video_decode_backend=video_decode_backend,num_frames=self.num_frames),
                                                     video_decode_backend=video_decode_backend,
-                                                    num_frames=num_frames)
+                                                    num_frames=self.num_frames)
                     # print(f'success get video')
                     data_dict['video_pixel_values'] = video
                     
@@ -234,7 +243,7 @@ class LLaVADataset(Dataset):
                 pass
         
         # print(f'batched_item[index_list] {len([batched_item[i]for i in index_list])}')
-        return [batched_item[i]for i in index_list]
+        return [copyed_batched_item[i]for i in index_list]
 
         # try:
         # batch_size = 5

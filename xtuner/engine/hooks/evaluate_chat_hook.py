@@ -30,6 +30,7 @@ class EvaluateChatHook(Hook):
                  prompt_template=None,
                  every_n_iters=None,
                  max_new_tokens=600,
+                 video_frames=8,
                  stop_word=None,
                  stop_words=[]):
         self.evaluation_inputs = evaluation_inputs
@@ -61,11 +62,11 @@ class EvaluateChatHook(Hook):
                 self.evaluation_videos = [self.evaluation_videos[0]] * len(
                     self.evaluation_inputs_video)
             video_decode_backend = 'decord'
-            num_frames = 10
+            self.num_frames = video_frames
             self.evaluation_videos = [
-                load_and_transform_video(video, get_video_transform(video_decode_backend=video_decode_backend,num_frames=num_frames),
+                load_and_transform_video(video, get_video_transform(video_decode_backend=video_decode_backend,num_frames=self.num_frames),
                                                 video_decode_backend=video_decode_backend,
-                                                num_frames=num_frames) for video in self.evaluation_videos
+                                                num_frames=self.num_frames) for video in self.evaluation_videos
             ]
         ##video loading finish
         if prompt_template is None:

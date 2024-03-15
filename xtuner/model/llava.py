@@ -189,8 +189,8 @@ class LLaVAModel(BaseModel):
             pixel_values = self.projector(
                 visual_outputs.hidden_states[self.visual_select_layer][:, 1:])
             instance_type = data['instance_type']
-            # if 'video' in instance_type:
-            #     print(f'after projection, pixel value shape: {pixel_values.shape}, instance list {instance_type}')
+            
+            # print(f'after projection, pixel value shape: {pixel_values.shape}, instance list {instance_type}')
 
             data['pixel_values'] = pixel_values
             # for item in data['instance_type']:

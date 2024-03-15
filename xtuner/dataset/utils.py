@@ -333,10 +333,11 @@ def get_video_transform(video_decode_backend, num_frames):
 def load_and_transform_video(
         video_path,
         transform,
+        num_frames,
         video_decode_backend='opencv',
         clip_start_sec=0.0,
         clip_end_sec=None,
-        num_frames=8,
+        
 ):
     
     if video_decode_backend == 'pytorchvideo':

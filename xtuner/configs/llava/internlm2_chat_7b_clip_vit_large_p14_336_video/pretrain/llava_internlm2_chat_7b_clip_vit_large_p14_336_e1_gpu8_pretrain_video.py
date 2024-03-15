@@ -9,7 +9,7 @@ from transformers import (AutoModelForCausalLM, AutoTokenizer,
                           BitsAndBytesConfig, CLIPImageProcessor,
                           CLIPVisionModel)
 
-from xtuner.dataset import LLaVADataset, LanguageBindVideoProcessor
+from xtuner.dataset import LLaVADataset
 from xtuner.dataset.collate_fns import default_collate_fn
 from xtuner.dataset.map_fns import llava_map_fn, template_map_fn_factory
 from xtuner.engine import DatasetInfoHook, EvaluateChatHook
@@ -42,6 +42,10 @@ weight_decay = 0
 max_norm = 1  # grad clip
 warmup_ratio = 0.03
 
+video_frames = 6
+video_batch_size = 8
+image_batch_size = 20
+
 # Evaluate the generation performance during the training
 evaluation_freq = 500
 SYSTEM = ''
@@ -61,8 +65,6 @@ image_processor = dict(
     type=CLIPImageProcessor.from_pretrained,
     pretrained_model_name_or_path=visual_encoder_name_or_path,
     trust_remote_code=True)
-
-video_processor = LanguageBindVideoProcessor
 
 
 model = dict(
@@ -95,11 +97,13 @@ llava_dataset = dict(
     data_path=data_path,
     video_folder = video_folder,
     tokenizer=tokenizer,
-    video_processor = video_processor,
-    # image_processor=image_processor,
+    image_processor=image_processor,
     dataset_map_fn=llava_map_fn,
     template_map_fn=dict(
         type=template_map_fn_factory, template=prompt_template),
+    video_frames=video_frames,
+    video_batch_size=video_batch_size,
+    image_batch_size=image_batch_size,
     max_length=max_length,
     pad_image_to_square=False)
 
@@ -159,6 +163,7 @@ custom_hooks = [
         evaluation_inputs=evaluation_inputs,
         evaluation_images=evaluation_images,
         system=SYSTEM,
+        video_frames=video_frames,
         prompt_template=prompt_template)
 ]
 

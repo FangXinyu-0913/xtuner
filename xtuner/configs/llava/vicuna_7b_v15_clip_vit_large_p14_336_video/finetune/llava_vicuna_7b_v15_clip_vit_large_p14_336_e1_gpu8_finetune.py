@@ -11,7 +11,8 @@ from xtuner.dataset import LLaVADataset
 from xtuner.dataset.collate_fns import default_collate_fn
 from xtuner.dataset.map_fns import llava_map_fn, template_map_fn_factory
 from xtuner.dataset.samplers import LengthGroupedSampler
-from xtuner.engine import DatasetInfoHook, EvaluateChatHook
+from xtuner.engine.hooks import DatasetInfoHook, EvaluateChatHook
+from xtuner.engine.runner import TrainLoop
 from xtuner.model import LLaVAModel
 from xtuner.utils import PROMPT_TEMPLATE
 
@@ -19,22 +20,20 @@ from xtuner.utils import PROMPT_TEMPLATE
 #                          PART 1  Settings                           #
 #######################################################################
 # Model
-llm_name_or_path = '/cpfs01/shared/llmeval/dhd/hub/models--internlm--internlm2-chat-7b/snapshots/2292b86b21cb856642782cebed0a453997453b1f' #'internlm/internlm2-chat-7b'
-visual_encoder_name_or_path = 'openai/clip-vit-large-patch14-336' #'/cpfs01/shared/llmeval/dhd/hub/models--laion--CLIP-ViT-L-14-DataComp.XL-s13B-b90K' 
-# visual_encoder_name_or_path = 'openai/clip-vit-large-patch14-336'
-# Specify the pretrained pth,, temp using https://huggingface.co/liuhaotian/llava-336px-pretrain-llama-2-7b-chats
-pretrained_pth = '/cpfs01/user/fangxinyu/work_dirs/epoch_1.pth' # '/cpfs01/user/fangxinyu/xtuner/mm_projector.bin' #'./work_dirs/llava_internlm2_chat_7b_clip_vit_large_p14_336_e1_gpu8_pretrain/epoch_1.pth'  # noqa: E501
+llm_name_or_path = 'lmsys/vicuna-7b-v1.5'
+visual_encoder_name_or_path = 'openai/clip-vit-large-patch14-336'
+# Specify the pretrained pth
+pretrained_pth = './work_dirs/llava_vicuna_7b_v15_clip_vit_large_p14_336_e1_gpu8_pretrain/iter_2181.pth'  # noqa: E501
 
 # Data
-data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/llava_image_tune/llava_v1_5_mix665k.json' #image_path
-image_folder = '/cpfs01/user/fangxinyu/Video-LLaVA/data'
-video_data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/videochatgpt_llavaimage_tune_sampledMinor.json' #'/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/videochatgpt_llavaimage_tune_modify_shuffle.json'
-video_folder = '/cpfs01/user/fangxinyu/Video-LLaVA/data'
-prompt_template = PROMPT_TEMPLATE.internlm2_chat
+data_root = './data/llava_data/'
+data_path = data_root + 'LLaVA-Instruct-150K/llava_v1_5_mix665k.json'
+image_folder = data_root + 'llava_images'
+prompt_template = PROMPT_TEMPLATE.vicuna
 max_length = int(2048 - (336 / 14)**2)
 
 # Scheduler & Optimizer
-batch_size = 4  # per_device
+batch_size = 16  # per_device
 accumulative_counts = 1
 dataloader_num_workers = 0
 max_epochs = 1
@@ -45,17 +44,16 @@ weight_decay = 0
 max_norm = 1  # grad clip
 warmup_ratio = 0.03
 
-video_frames = 6
-video_batch_size = 8
-image_batch_size = 20
+# Save
+save_steps = 500
+save_total_limit = 2  # Maximum checkpoints to keep (-1 means unlimited)
 
 # Evaluate the generation performance during the training
 evaluation_freq = 500
 SYSTEM = ''
 evaluation_images = 'https://llava-vl.github.io/static/images/view.jpg'
 evaluation_inputs = ['请描述一下这张照片', 'Please describe this picture']
-evaluation_videos = '/cpfs01/user/fangxinyu/xtuner/xtuner/dataset/sample_demo_1.mp4'
-evaluation_inputs_video = ['为什么这段视频很有趣', 'Why is this video funny']
+
 #######################################################################
 #            PART 2  Model & Tokenizer & Image Processor              #
 #######################################################################
@@ -91,16 +89,11 @@ llava_dataset = dict(
     type=LLaVADataset,
     data_path=data_path,
     image_folder=image_folder,
-    video_data_path = video_data_path,
-    video_folder = video_folder,
     tokenizer=tokenizer,
     image_processor=image_processor,
     dataset_map_fn=llava_map_fn,
     template_map_fn=dict(
         type=template_map_fn_factory, template=prompt_template),
-    video_frames=6,
-    video_batch_size=8,
-    image_batch_size=20,
     max_length=max_length,
     pad_image_to_square=True)
 
@@ -142,12 +135,12 @@ param_scheduler = [
         eta_min=0.0,
         by_epoch=True,
         begin=warmup_ratio * max_epochs,
-        T_max=max_epochs,
+        end=max_epochs,
         convert_to_iter_based=True)
 ]
 
 # train, val, test setting
-train_cfg = dict(by_epoch=True, max_epochs=max_epochs, val_interval=1)
+train_cfg = dict(type=TrainLoop, max_epochs=max_epochs)
 
 #######################################################################
 #                           PART 5  Runtime                           #
@@ -160,12 +153,9 @@ custom_hooks = [
         tokenizer=tokenizer,
         image_processor=image_processor,
         every_n_iters=evaluation_freq,
-        evaluation_videos=evaluation_videos,
-        evaluation_inputs_video=evaluation_inputs_video,
         evaluation_inputs=evaluation_inputs,
         evaluation_images=evaluation_images,
         system=SYSTEM,
-        video_frames=video_frames,
         prompt_template=prompt_template)
 ]
 
@@ -173,12 +163,16 @@ custom_hooks = [
 default_hooks = dict(
     # record the time of every iteration.
     timer=dict(type=IterTimerHook),
-    # print log every 100 iterations.
-    logger=dict(type=LoggerHook, interval=10),
+    # print log every 10 iterations.
+    logger=dict(type=LoggerHook, log_metric_by_epoch=False, interval=10),
     # enable the parameter scheduler.
     param_scheduler=dict(type=ParamSchedulerHook),
-    # save checkpoint per epoch.
-    checkpoint=dict(type=CheckpointHook, interval=2000, by_epoch=False),
+    # save checkpoint per `save_steps`.
+    checkpoint=dict(
+        type=CheckpointHook,
+        by_epoch=False,
+        interval=save_steps,
+        max_keep_ckpts=save_total_limit),
     # set sampler seed in distributed evrionment.
     sampler_seed=dict(type=DistSamplerSeedHook),
 )
@@ -207,3 +201,6 @@ resume = False
 
 # Defaults to use random seed and disable `deterministic`
 randomness = dict(seed=None, deterministic=False)
+
+# set log processor
+log_processor = dict(by_epoch=False)
