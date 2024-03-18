@@ -53,7 +53,7 @@ video_batch_size = 6
 image_batch_size = 20
 
 # Save
-save_steps = 1500
+save_steps = 500
 save_total_limit = 1  # Maximum checkpoints to keep (-1 means unlimited)
 
 # Evaluate the generation performance during the training
