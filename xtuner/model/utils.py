@@ -129,6 +129,7 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name='default'):
 # Modified from https://github.com/haotian-liu/LLaVA/blob/82fc5e0e5f4393a4c26851fa32c69ab37ea3b146/llava/model/llava_arch.py#L99  # noqa: E501
 def prepare_inputs_labels_for_multimodal(
         llm: PreTrainedModel,
+        video_frames: Optional[int],
         instance_list: List[str] = ['image'],
         input_ids: torch.LongTensor = None,
         position_ids: Optional[torch.LongTensor] = None,
@@ -225,8 +226,8 @@ def prepare_inputs_labels_for_multimodal(
                 cur_new_inputs_embeds.append(cur_inputs_embeds_no_im[i])
                 cur_new_labels.append(cur_labels_noim[i])
                 if i < num_videos:
-                    cur_pixel_values = pixel_values[cur_image_idx: cur_image_idx + 10]
-                    cur_image_idx += 10
+                    cur_pixel_values = pixel_values[cur_image_idx: cur_image_idx + video_frames]
+                    cur_image_idx += video_frames
                     for item in cur_pixel_values:
                         #VIDEO Squeeze to IMAGE
                         cur_new_inputs_embeds.append(item) #check here

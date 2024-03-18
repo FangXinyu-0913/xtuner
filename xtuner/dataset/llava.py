@@ -7,7 +7,6 @@ import torch
 from datasets import Dataset as HFDataset
 from datasets import DatasetDict
 from mmengine.config import Config, ConfigDict
-from mmengine.dist import sync_random_seed
 from PIL import Image
 import numpy as np
 import cv2
@@ -30,6 +29,7 @@ class LLaVADataset(Dataset):
                  video_folder,
                  tokenizer,
                  image_processor,
+                 frame_size = 336,
                  max_dataset_length=None,
                  dataset_map_fn=None,
                  template_map_fn=None,
@@ -38,15 +38,12 @@ class LLaVADataset(Dataset):
                  video_batch_size=4,
                  image_batch_size=20,
                  pad_image_to_square=False,
-                 shuffle_dataset=True,
-                 seed: Optional[int] = None):
+                 shuffle_dataset=True):
         super().__init__()
 
         # json_data = json.load(open(data_path))
         json_video_data = json.load(open(video_data_path))
-        if seed is None:
-            seed = sync_random_seed()
-        self.seed = seed
+
         self.shuffle_dataset = shuffle_dataset
         
         self.num_frames = video_frames
@@ -82,7 +79,7 @@ class LLaVADataset(Dataset):
             remove_unused_columns=False,
             pack_to_max_length=False,
             with_image_token=True)
-
+        self.frame_size = frame_size
         self.image_folder = image_folder
         self.video_folder = video_folder
         if isinstance(image_processor, dict) or isinstance(
@@ -105,7 +102,7 @@ class LLaVADataset(Dataset):
         batched_data = []
         image_data = []
         video_data = []
-        random.seed(self.seed)
+        
         
         for item in self.text_data:
             if item.get('image', None) is not None and item['image'] != '':
@@ -157,7 +154,7 @@ class LLaVADataset(Dataset):
         batched_data = []
         image_data = []
         video_data = []
-        random.seed(self.seed)
+        
         
         for item in self.text_data:
             if item.get('image', None) is not None and item['image'] != '':
@@ -227,7 +224,7 @@ class LLaVADataset(Dataset):
                     video_decode_backend = 'decord'
                     
                     video = load_and_transform_video(os.path.join(self.video_folder, video_file), 
-                                                    get_video_transform(video_decode_backend=video_decode_backend,num_frames=self.num_frames),
+                                                    get_video_transform(video_decode_backend=video_decode_backend, num_frames=self.num_frames, frame_size=self.frame_size),
                                                     video_decode_backend=video_decode_backend,
                                                     num_frames=self.num_frames)
                     # print(f'success get video')

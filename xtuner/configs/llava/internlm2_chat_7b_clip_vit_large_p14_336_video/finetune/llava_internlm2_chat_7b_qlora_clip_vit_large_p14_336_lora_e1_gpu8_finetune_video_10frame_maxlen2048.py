@@ -31,10 +31,16 @@ pretrained_pth = '/cpfs01/user/fangxinyu/work_dirs/epoch_1.pth'  # noqa: E501
 # data_root = './data/llava_data/'
 data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/llava_image_tune/llava_v1_5_mix665k.json' #image_path
 image_folder = '/cpfs01/user/fangxinyu/Video-LLaVA/data'
-video_data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/videochatgpt_llavaimage_tune_modify_shuffle.json'#modify_shuffle , sampledMinor
+video_data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/videochatgpt_llavaimage_tune_sampledMinor.json'
 video_folder = '/cpfs01/user/fangxinyu/Video-LLaVA/data'
 prompt_template = PROMPT_TEMPLATE.internlm2_chat
-max_length = int(2048 - (336 / 14)**2) #text max length, the same with previous situation
+
+video_frames = 10
+video_batch_size = 4
+image_batch_size = 16
+frame_size = 336
+pixel_size = 14
+max_length = int(2048 - (frame_size / pixel_size)**2) #text max length, the same with previous situation
 
 # Scheduler & Optimizer
 batch_size = 1  # per_device
@@ -48,16 +54,12 @@ weight_decay = 0
 max_norm = 1  # grad clip
 warmup_ratio = 0.03
 
-video_frames = 10
-video_batch_size = 3
-image_batch_size = 15
-# seed = 7538
 # Save
 save_steps = 500
 save_total_limit = 1  # Maximum checkpoints to keep (-1 means unlimited)
 
 # Evaluate the generation performance during the training
-evaluation_freq = 1500
+evaluation_freq = 500
 SYSTEM = ''
 evaluation_images = 'https://llava-vl.github.io/static/images/view.jpg'
 evaluation_inputs = ['请描述一下这张照片', 'Please describe this picture']
@@ -83,6 +85,7 @@ model = dict(
     freeze_llm=True,
     freeze_visual_encoder=True,
     pretrained_pth=pretrained_pth,
+    video_frames=video_frames,
     llm=dict(
         type=AutoModelForCausalLM.from_pretrained,
         pretrained_model_name_or_path=llm_name_or_path,
@@ -128,6 +131,7 @@ llava_dataset = dict(
     video_batch_size=video_batch_size,
     image_batch_size=image_batch_size,
     max_length=max_length,
+    frame_size=frame_size,
     pad_image_to_square=True)
 
 train_dataloader = dict(
@@ -181,6 +185,7 @@ custom_hooks = [
     dict(
         type=EvaluateChatHook,
         tokenizer=tokenizer,
+        frame_size=frame_size,
         image_processor=image_processor,
         every_n_iters=evaluation_freq,
         evaluation_videos=evaluation_videos,

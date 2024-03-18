@@ -284,7 +284,7 @@ def decode_base64_to_image(base64_string):
 
 OPENAI_DATASET_MEAN = (0.48145466, 0.4578275, 0.40821073)
 OPENAI_DATASET_STD = (0.26862954, 0.26130258, 0.27577711)
-def get_video_transform(video_decode_backend, num_frames):
+def get_video_transform(video_decode_backend, num_frames, frame_size = 336):
 
     if video_decode_backend == 'pytorchvideo':
         transform = ApplyTransformToKey(
@@ -294,8 +294,8 @@ def get_video_transform(video_decode_backend, num_frames):
                     UniformTemporalSubsample(num_frames),
                     Lambda(lambda x: x / 255.0),
                     NormalizeVideo(mean=OPENAI_DATASET_MEAN, std=OPENAI_DATASET_STD),
-                    ShortSideScale(size=224),
-                    CenterCropVideo(224),
+                    ShortSideScale(size=frame_size),
+                    CenterCropVideo(frame_size),
                     RandomHorizontalFlipVideo(p=0.5),
                 ]
             ),
@@ -308,8 +308,8 @@ def get_video_transform(video_decode_backend, num_frames):
                 # UniformTemporalSubsample(num_frames),
                 Lambda(lambda x: x / 255.0),
                 NormalizeVideo(mean=OPENAI_DATASET_MEAN, std=OPENAI_DATASET_STD),
-                ShortSideScale(size=336),
-                CenterCropVideo(336),
+                ShortSideScale(size=frame_size),
+                CenterCropVideo(frame_size),
                 RandomHorizontalFlipVideo(p=0.5),
             ]
         )
@@ -320,8 +320,8 @@ def get_video_transform(video_decode_backend, num_frames):
                 # UniformTemporalSubsample(num_frames),
                 Lambda(lambda x: x / 255.0),
                 NormalizeVideo(mean=OPENAI_DATASET_MEAN, std=OPENAI_DATASET_STD),
-                ShortSideScale(size=224),
-                CenterCropVideo(224),
+                ShortSideScale(size=frame_size),
+                CenterCropVideo(frame_size),
                 RandomHorizontalFlipVideo(p=0.5),
             ]
         )

@@ -83,6 +83,7 @@ model = dict(
     freeze_llm=True,
     freeze_visual_encoder=True,
     pretrained_pth=pretrained_pth,
+    num_frames=video_frames,
     llm=dict(
         type=AutoModelForCausalLM.from_pretrained,
         pretrained_model_name_or_path=llm_name_or_path,

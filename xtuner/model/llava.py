@@ -30,6 +30,7 @@ class LLaVAModel(BaseModel):
     def __init__(self,
                  llm,
                  visual_encoder,
+                 video_frames,
                  freeze_llm=False,
                  freeze_visual_encoder=False,
                  visual_select_layer=-2,
@@ -46,6 +47,7 @@ class LLaVAModel(BaseModel):
             self.visual_encoder = self._build_from_cfg_or_module(
                 visual_encoder)
         self.llm.config.use_cache = False
+        self.video_frames = video_frames
         dispatch_modules(self.llm)
 
         projector_config = ProjectorConfig(
@@ -96,7 +98,7 @@ class LLaVAModel(BaseModel):
 
         self._is_init = True
 
-        self.video_compress = CompressNet([20,336,336])
+        # self.video_compress = CompressNet([20,336,336])
 
     def _parse_lora_config(self, lora_config):
         if isinstance(lora_config, dict) or isinstance(
@@ -195,7 +197,7 @@ class LLaVAModel(BaseModel):
             data['pixel_values'] = pixel_values
             # for item in data['instance_type']:
             del data['instance_type']
-            data = prepare_inputs_labels_for_multimodal(llm=self.llm, instance_list=instance_type, **data)
+            data = prepare_inputs_labels_for_multimodal(llm=self.llm, instance_list=instance_type, video_frames=self.video_frames, **data)
 
         if mode == 'loss':
             return self.compute_loss(data, data_samples)

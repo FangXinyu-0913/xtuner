@@ -22,6 +22,7 @@ class EvaluateChatHook(Hook):
     def __init__(self,
                  tokenizer,
                  evaluation_inputs,
+                 frame_size,
                  evaluation_images=None,
                  image_processor=None,
                  evaluation_videos=None,
@@ -33,6 +34,7 @@ class EvaluateChatHook(Hook):
                  video_frames=8,
                  stop_word=None,
                  stop_words=[]):
+        self.frame_size=frame_size
         self.evaluation_inputs = evaluation_inputs
         if isinstance(self.evaluation_inputs, str):
             self.evaluation_inputs = [self.evaluation_inputs]
@@ -64,7 +66,7 @@ class EvaluateChatHook(Hook):
             video_decode_backend = 'decord'
             self.num_frames = video_frames
             self.evaluation_videos = [
-                load_and_transform_video(video, get_video_transform(video_decode_backend=video_decode_backend,num_frames=self.num_frames),
+                load_and_transform_video(video, get_video_transform(video_decode_backend=video_decode_backend,num_frames=self.num_frames, frame_size=self.frame_size),
                                                 video_decode_backend=video_decode_backend,
                                                 num_frames=self.num_frames) for video in self.evaluation_videos
             ]
@@ -159,6 +161,7 @@ class EvaluateChatHook(Hook):
 
             mm_inputs = prepare_inputs_labels_for_multimodal(
                 llm=model.llm,
+                video_frames=self.num_frames,
                 input_ids=input_ids.unsqueeze(0),
                 pixel_values=pixel_values)
 
@@ -214,6 +217,7 @@ class EvaluateChatHook(Hook):
 
             mm_inputs = prepare_inputs_labels_for_multimodal(
                 llm=model.llm,
+                video_frames=self.num_frames,
                 input_ids=input_ids.unsqueeze(0),
                 pixel_values=pixel_values,
                 instance_list=['video'])
