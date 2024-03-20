@@ -31,13 +31,15 @@ pretrained_pth = '/cpfs01/user/fangxinyu/work_dirs/epoch_1.pth'  # noqa: E501
 # data_root = './data/llava_data/'
 data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/llava_image_tune/llava_v1_5_mix665k.json' #image_path
 image_folder = '/cpfs01/user/fangxinyu/Video-LLaVA/data'
-video_data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/videochatgpt_llavaimage_tune_sampledMinor.json'
+video_data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/videochatgpt_llavaimage_tune_modify_shuffle.json'
 video_folder = '/cpfs01/user/fangxinyu/Video-LLaVA/data'
+offline_data_folder_sampled='/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/sampled'
+offline_data_folder_full='/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/Full-v1'
 prompt_template = PROMPT_TEMPLATE.internlm2_chat
 
 video_frames = 10
-video_batch_size = 4
-image_batch_size = 16
+video_batch_size = 3
+image_batch_size = 15
 frame_size = 336
 pixel_size = 14
 max_length = int(2048 - (frame_size / pixel_size)**2) #text max length, the same with previous situation
@@ -118,6 +120,7 @@ model = dict(
 #######################################################################
 llava_dataset = dict(
     type=LLaVADataset,
+    # offline_processed_text_folder=offline_data_folder_sampled,
     data_path=data_path,
     image_folder=image_folder,
     video_data_path = video_data_path,
@@ -182,19 +185,19 @@ train_cfg = dict(type=TrainLoop, max_epochs=max_epochs)
 # Log the dialogue periodically during the training process, optional
 custom_hooks = [
     dict(type=DatasetInfoHook, tokenizer=tokenizer),
-    dict(
-        type=EvaluateChatHook,
-        tokenizer=tokenizer,
-        frame_size=frame_size,
-        image_processor=image_processor,
-        every_n_iters=evaluation_freq,
-        evaluation_videos=evaluation_videos,
-        evaluation_inputs_video=evaluation_inputs_video,
-        evaluation_inputs=evaluation_inputs,
-        evaluation_images=evaluation_images,
-        video_frames=video_frames,
-        system=SYSTEM,
-        prompt_template=prompt_template)
+    # dict(
+    #     type=EvaluateChatHook,
+    #     tokenizer=tokenizer,
+    #     frame_size=frame_size,
+    #     image_processor=image_processor,
+    #     every_n_iters=evaluation_freq,
+    #     evaluation_videos=evaluation_videos,
+    #     evaluation_inputs_video=evaluation_inputs_video,
+    #     evaluation_inputs=evaluation_inputs,
+    #     evaluation_images=evaluation_images,
+    #     video_frames=video_frames,
+    #     system=SYSTEM,
+    #     prompt_template=prompt_template)
 ]
 
 # configure default hooks

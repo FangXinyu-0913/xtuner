@@ -117,7 +117,7 @@ class EasySampler(Sampler):
             self.length = length
         else:
             self.length = getattr(self.dataset, length_property)
-        assert isinstance(self.length, (list, tuple))
+        # assert isinstance(self.length, (list, tuple))
 
         self.total_batch_size = total_batch_size
 

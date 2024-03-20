@@ -129,7 +129,7 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name='default'):
 # Modified from https://github.com/haotian-liu/LLaVA/blob/82fc5e0e5f4393a4c26851fa32c69ab37ea3b146/llava/model/llava_arch.py#L99  # noqa: E501
 def prepare_inputs_labels_for_multimodal(
         llm: PreTrainedModel,
-        video_frames: Optional[int],
+        video_frames: Optional[int] = 10,
         instance_list: List[str] = ['image'],
         input_ids: torch.LongTensor = None,
         position_ids: Optional[torch.LongTensor] = None,
@@ -175,11 +175,7 @@ def prepare_inputs_labels_for_multimodal(
     cur_image_idx = 0
     for batch_idx, (cur_input_ids, instance) in enumerate(zip(input_ids,instance_list)):
         num_images = (cur_input_ids == IMAGE_TOKEN_INDEX).sum()
-        if instance == 'video':
-            num_videos = 1
-            num_images = 0
-        else:
-            num_videos = 0
+        num_videos = (cur_input_ids == VIDEO_TOKEN_INDEX).sum()
         #num_videos = # (cur_input_ids == VIDEO_TOKEN_INDEX).sum() 
         # print(f'image num {num_images}, video num {num_videos}')
         if num_images == 0 and num_videos == 0:
@@ -195,11 +191,11 @@ def prepare_inputs_labels_for_multimodal(
         
         if num_videos > 0:
             video_token_indices =  [-1] + torch.where(       #[-1, 4, cur_input_ids.shape[0]]
-                cur_input_ids == IMAGE_TOKEN_INDEX)[0].tolist() + [
+                cur_input_ids == VIDEO_TOKEN_INDEX)[0].tolist() + [
                     cur_input_ids.shape[0]
                 ]
-            if len(video_token_indices) == 2:
-                video_token_indices = [-1, 4, cur_input_ids.shape[0]]
+            # if len(video_token_indices) == 2:
+            #     video_token_indices = [-1, 4, cur_input_ids.shape[0]]
             # print(f'video_token_indices:',video_token_indices)
             # import ipdb
             # ipdb.set_trace()
@@ -232,19 +228,21 @@ def prepare_inputs_labels_for_multimodal(
                         #VIDEO Squeeze to IMAGE
                         cur_new_inputs_embeds.append(item) #check here
                         cur_new_labels.append(
-                            torch.full((item.shape[0], ),
+                            torch.full((item.shape[0], ),#report error here
                                     IGNORE_INDEX,
                                     device=cur_labels.device,
                                     dtype=cur_labels.dtype))
         
-        if num_images > 0:
+        elif num_images > 0:
+            # print(f'num_images:{num_images}')
             # import ipdb
             # ipdb.set_trace()
+            # print(pixel_values)
             image_token_indices = [-1] + torch.where(
                 cur_input_ids == IMAGE_TOKEN_INDEX)[0].tolist() + [
                     cur_input_ids.shape[0]
                 ]
-            # print(f'image token indices: {image_token_indices}, {cur_input_ids.shape[0]}')
+            # print(f'image token indices: {image_token_indices}, {cur_input_ids}')
             cur_input_ids_noim = []
             cur_labels = labels[batch_idx]
             cur_labels_noim = []
@@ -335,6 +333,8 @@ def prepare_inputs_labels_for_multimodal(
     # except:
     #     print('get failure')
     # print(new_inputs_embeds.shape)
+    # print(position_ids.shape)
+    # print(new_inputs_embeds.requires_grad)
     return {
         'input_ids': None,
         'position_ids': position_ids,

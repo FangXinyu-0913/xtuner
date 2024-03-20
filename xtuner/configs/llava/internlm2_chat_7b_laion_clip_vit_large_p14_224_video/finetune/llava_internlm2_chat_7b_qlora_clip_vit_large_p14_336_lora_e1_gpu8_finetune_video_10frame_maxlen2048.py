@@ -3,15 +3,17 @@ import torch
 from mmengine.hooks import (CheckpointHook, DistSamplerSeedHook, IterTimerHook,
                             LoggerHook, ParamSchedulerHook)
 from mmengine.optim import AmpOptimWrapper, CosineAnnealingLR, LinearLR
+from peft import LoraConfig
 from torch.optim import AdamW
 from transformers import (AutoModelForCausalLM, AutoTokenizer,
-                          CLIPImageProcessor, CLIPVisionModel)
+                          BitsAndBytesConfig, CLIPImageProcessor,
+                          CLIPVisionModel)
 
 from xtuner.dataset import LLaVADataset
-from xtuner.dataset.collate_fns import default_collate_fn
+from xtuner.dataset.collate_fns import default_collate_fn, video_collate_fn
 from xtuner.dataset.map_fns import llava_map_fn, template_map_fn_factory
-from xtuner.dataset.samplers import LengthGroupedSampler
-from xtuner.engine.hooks import DatasetInfoHook, EvaluateChatHook
+from xtuner.dataset.samplers import LengthGroupedSampler, EasySampler, DefaultSampler
+from xtuner.engine import DatasetInfoHook, EvaluateChatHook
 from xtuner.engine.runner import TrainLoop
 from xtuner.model import LLaVAModel
 from xtuner.utils import PROMPT_TEMPLATE
@@ -20,25 +22,35 @@ from xtuner.utils import PROMPT_TEMPLATE
 #                          PART 1  Settings                           #
 #######################################################################
 # Model
-llm_name_or_path = 'lmsys/vicuna-7b-v1.5'
-visual_encoder_name_or_path = 'openai/clip-vit-large-patch14-336'
-# Specify the pretrained pth
-pretrained_pth = './work_dirs/llava_vicuna_7b_v15_clip_vit_large_p14_336_e1_gpu8_pretrain/iter_2181.pth'  # noqa: E501
+llm_name_or_path = '/cpfs01/shared/llmeval/dhd/hub/models--internlm--internlm2-chat-7b/snapshots/2292b86b21cb856642782cebed0a453997453b1f'
+visual_encoder_name_or_path = '/cpfs01/shared/llmeval/dhd/hub/models--openai--clip-vit-large-patch14-336/snapshots/ce19dc912ca5cd21c8a653c79e251e808ccabcd1' #'/cpfs01/shared/llmeval/dhd/hub/models--laion--CLIP-ViT-L-14-DataComp.XL-s13B-b90K' #'openai/clip-vit-large-patch14-336'
+# Specify the pretrained pth, temp using https://huggingface.co/liuhaotian/llava-336px-pretrain-llama-2-7b-chats
+pretrained_pth = '/cpfs01/user/fangxinyu/work_dirs/epoch_1.pth'  # noqa: E501
 
 # Data
-data_root = './data/llava_data/'
-data_path = data_root + 'LLaVA-Instruct-150K/llava_v1_5_mix665k.json'
-image_folder = data_root + 'llava_images'
-prompt_template = PROMPT_TEMPLATE.vicuna
-max_length = int(2048 - (336 / 14)**2)
+# data_root = './data/llava_data/'
+data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/llava_image_tune/llava_v1_5_mix665k.json' #image_path
+image_folder = '/cpfs01/user/fangxinyu/Video-LLaVA/data'
+video_data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/videochatgpt_llavaimage_tune_sampledMinor.json'
+video_folder = '/cpfs01/user/fangxinyu/Video-LLaVA/data'
+offline_data_folder_sampled='/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/sampled'
+offline_data_folder_full='/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/Full-v1'
+prompt_template = PROMPT_TEMPLATE.internlm2_chat
+
+video_frames = 10
+video_batch_size = 8
+image_batch_size = 15
+frame_size = 224 
+pixel_size = 16
+max_length = int(2048 - (frame_size / pixel_size)**2) #text max length, the same with previous situation
 
 # Scheduler & Optimizer
-batch_size = 16  # per_device
+batch_size = 1  # per_device
 accumulative_counts = 1
-dataloader_num_workers = 0
+dataloader_num_workers = 4
 max_epochs = 1
 optim_type = AdamW
-lr = 2e-5
+lr = 2e-4
 betas = (0.9, 0.999)
 weight_decay = 0
 max_norm = 1  # grad clip
@@ -46,13 +58,15 @@ warmup_ratio = 0.03
 
 # Save
 save_steps = 500
-save_total_limit = 2  # Maximum checkpoints to keep (-1 means unlimited)
+save_total_limit = 1  # Maximum checkpoints to keep (-1 means unlimited)
 
 # Evaluate the generation performance during the training
 evaluation_freq = 500
 SYSTEM = ''
 evaluation_images = 'https://llava-vl.github.io/static/images/view.jpg'
 evaluation_inputs = ['请描述一下这张照片', 'Please describe this picture']
+evaluation_videos = '/cpfs01/user/fangxinyu/xtuner/xtuner/dataset/sample_demo_1.mp4'
+evaluation_inputs_video = ['为什么这段视频很有趣', 'Why is this video funny']
 
 #######################################################################
 #            PART 2  Model & Tokenizer & Image Processor              #
@@ -70,42 +84,65 @@ image_processor = dict(
 
 model = dict(
     type=LLaVAModel,
-    freeze_llm=False,
+    freeze_llm=True,
     freeze_visual_encoder=True,
     pretrained_pth=pretrained_pth,
+    video_frames=video_frames,
     llm=dict(
         type=AutoModelForCausalLM.from_pretrained,
         pretrained_model_name_or_path=llm_name_or_path,
         trust_remote_code=True,
-        torch_dtype=torch.float32),
+        torch_dtype=torch.float16,
+        quantization_config=dict(
+            type=BitsAndBytesConfig,
+            load_in_4bit=True,
+            load_in_8bit=False,
+            llm_int8_threshold=6.0,
+            llm_int8_has_fp16_weight=False,
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type='nf4')),
+    llm_lora=dict(
+        type=LoraConfig,
+        r=512,
+        lora_alpha=256,
+        lora_dropout=0.05,
+        bias='none',
+        task_type='CAUSAL_LM'),
     visual_encoder=dict(
         type=CLIPVisionModel.from_pretrained,
-        pretrained_model_name_or_path=visual_encoder_name_or_path))
+        pretrained_model_name_or_path=visual_encoder_name_or_path),
+    visual_encoder_lora=dict(
+        type=LoraConfig, r=64, lora_alpha=16, lora_dropout=0.05, bias='none'))
 
 #######################################################################
 #                      PART 3  Dataset & Dataloader                   #
 #######################################################################
 llava_dataset = dict(
     type=LLaVADataset,
+    offline_processed_text_folder=offline_data_folder_full,
     data_path=data_path,
     image_folder=image_folder,
+    video_data_path = video_data_path,
+    video_folder = video_folder,
     tokenizer=tokenizer,
     image_processor=image_processor,
     dataset_map_fn=llava_map_fn,
     template_map_fn=dict(
         type=template_map_fn_factory, template=prompt_template),
+    video_frames=video_frames,
+    video_batch_size=video_batch_size,
+    image_batch_size=image_batch_size,
     max_length=max_length,
+    frame_size=frame_size,
     pad_image_to_square=True)
 
 train_dataloader = dict(
     batch_size=batch_size,
     num_workers=dataloader_num_workers,
     dataset=llava_dataset,
-    sampler=dict(
-        type=LengthGroupedSampler,
-        length_property='modality_length',
-        per_device_batch_size=batch_size * accumulative_counts),
-    collate_fn=dict(type=default_collate_fn))
+    sampler=dict(type=DefaultSampler, shuffle=True),
+    collate_fn=dict(type=video_collate_fn))
 
 #######################################################################
 #                    PART 4  Scheduler & Optimizer                    #
@@ -135,7 +172,7 @@ param_scheduler = [
         eta_min=0.0,
         by_epoch=True,
         begin=warmup_ratio * max_epochs,
-        end=max_epochs,
+        T_max=max_epochs,
         convert_to_iter_based=True)
 ]
 
@@ -148,26 +185,30 @@ train_cfg = dict(type=TrainLoop, max_epochs=max_epochs)
 # Log the dialogue periodically during the training process, optional
 custom_hooks = [
     dict(type=DatasetInfoHook, tokenizer=tokenizer),
-    dict(
-        type=EvaluateChatHook,
-        tokenizer=tokenizer,
-        image_processor=image_processor,
-        every_n_iters=evaluation_freq,
-        evaluation_inputs=evaluation_inputs,
-        evaluation_images=evaluation_images,
-        system=SYSTEM,
-        prompt_template=prompt_template)
+    # dict(
+    #     type=EvaluateChatHook,
+    #     tokenizer=tokenizer,
+    #     frame_size=frame_size,
+    #     image_processor=image_processor,
+    #     every_n_iters=evaluation_freq,
+    #     evaluation_videos=evaluation_videos,
+    #     evaluation_inputs_video=evaluation_inputs_video,
+    #     evaluation_inputs=evaluation_inputs,
+    #     evaluation_images=evaluation_images,
+    #     video_frames=video_frames,
+    #     system=SYSTEM,
+    #     prompt_template=prompt_template)
 ]
 
 # configure default hooks
 default_hooks = dict(
     # record the time of every iteration.
     timer=dict(type=IterTimerHook),
-    # print log every 10 iterations.
+    # print log every 100 iterations.
     logger=dict(type=LoggerHook, log_metric_by_epoch=False, interval=10),
     # enable the parameter scheduler.
     param_scheduler=dict(type=ParamSchedulerHook),
-    # save checkpoint per `save_steps`.
+    # save checkpoint per 2000 iteration.
     checkpoint=dict(
         type=CheckpointHook,
         by_epoch=False,

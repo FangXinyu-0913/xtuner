@@ -1,11 +1,13 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import json
+import logging
 import os
 from typing import Iterator, Optional, Sized
 
 import torch
 from datasets import Dataset as HFDataset
-from datasets import DatasetDict
+from datasets import DatasetDict, load_from_disk
+from mmengine import print_log
 from mmengine.config import Config, ConfigDict
 from PIL import Image
 import numpy as np
@@ -23,63 +25,74 @@ import copy
 class LLaVADataset(Dataset):
 
     def __init__(self,
-                 data_path,
                  image_folder,
+                 data_path,
                  video_data_path,
                  video_folder,
                  tokenizer,
                  image_processor,
+                 video_frames,
                  frame_size = 336,
+                 offline_processed_text_folder=None,
                  max_dataset_length=None,
                  dataset_map_fn=None,
                  template_map_fn=None,
                  max_length=2048,
-                 video_frames=8,
                  video_batch_size=4,
                  image_batch_size=20,
                  pad_image_to_square=False,
                  shuffle_dataset=True):
         super().__init__()
-
-        # json_data = json.load(open(data_path))
-        json_video_data = json.load(open(video_data_path))
-
         self.shuffle_dataset = shuffle_dataset
         
         self.num_frames = video_frames
         self.video_batch_size = video_batch_size
         self.image_batch_size = image_batch_size
         self.remix_batch_size = {'image_num': 2, 'video_num': 2}
-        image_count = 0
-        video_count = 0
-        for item in json_video_data:
-            if 'image' in item.keys() and item['image'] != '':
-                image_count+=1
-            if 'video' in item.keys() and item['video'] != '':
-                video_count+=1
-        print(f'initial-image {image_count}, video {video_count}')
-        # for idx in range(len(json_data)):
-        #     if isinstance(json_data[idx]['id'], int):
-        #         json_data[idx]['id'] = str(json_data[idx]['id'])
-        for idx in range(len(json_video_data)):
-            if isinstance(json_video_data[idx]['id'], int):
-                json_video_data[idx]['id'] = str(json_video_data[idx]['id'])
-
-        
-        json_video_data = DatasetDict({'train': HFDataset.from_list(json_video_data)})
-
-        self.text_data = process_hf_dataset(
-            dataset=json_video_data,
-            tokenizer=tokenizer,
-            max_length=max_length,
-            dataset_map_fn=dataset_map_fn,
-            template_map_fn=template_map_fn,
-            split='train',
-            max_dataset_length=max_dataset_length,
-            remove_unused_columns=False,
-            pack_to_max_length=False,
-            with_image_token=True)
         self.frame_size = frame_size
+
+
+        assert offline_processed_text_folder or (video_data_path and tokenizer)
+        if offline_processed_text_folder and video_data_path:
+            print_log(
+                'Both `offline_processed_text_folder` and '
+                '`data_path` are set, and we load dataset from'
+                '`offline_processed_text_folder` '
+                f'({offline_processed_text_folder})',
+                logger='current',
+                level=logging.WARNING)
+
+        if offline_processed_text_folder is not None:
+            self.text_data = load_from_disk(offline_processed_text_folder)
+        else:
+            json_video_data = json.load(open(video_data_path))
+            image_count = 0
+            video_count = 0
+            for item in json_video_data:
+                if 'image' in item.keys() and item['image'] != '':
+                    image_count+=1
+                if 'video' in item.keys() and item['video'] != '':
+                    video_count+=1
+            print(f'initial-image {image_count}, video {video_count}')
+            for idx in range(len(json_video_data)):
+                if isinstance(json_video_data[idx]['id'], int):
+                    json_video_data[idx]['id'] = str(json_video_data[idx]['id'])
+            print('success finish transform idx')
+            json_video_data = DatasetDict({'train': HFDataset.from_list(json_video_data)})
+            print('success finish turn dataset into DatasetDict')
+            self.text_data = process_hf_dataset(
+                dataset=json_video_data,
+                tokenizer=tokenizer,
+                max_length=max_length,
+                dataset_map_fn=dataset_map_fn,
+                template_map_fn=template_map_fn,
+                split='train',
+                max_dataset_length=max_dataset_length,
+                remove_unused_columns=False,
+                pack_to_max_length=False,
+                with_image_token=True)
+            
+
         self.image_folder = image_folder
         self.video_folder = video_folder
         if isinstance(image_processor, dict) or isinstance(
@@ -193,6 +206,10 @@ class LLaVADataset(Dataset):
                 cur_len = -cur_len
             length_list.append(cur_len)
         return length_list
+
+    @property
+    def length(self):
+        return len(self.batched_data)
 
     def __len__(self):
         return len(self.batched_data)

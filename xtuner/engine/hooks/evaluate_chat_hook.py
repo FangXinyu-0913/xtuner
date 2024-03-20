@@ -11,7 +11,7 @@ from transformers import GenerationConfig, StoppingCriteriaList
 from xtuner.dataset.utils import expand2square, load_image, load_and_transform_video, get_video_transform
 from xtuner.model.utils import prepare_inputs_labels_for_multimodal
 from xtuner.registry import BUILDER
-from xtuner.utils import (DEFAULT_IMAGE_TOKEN, IMAGE_TOKEN_INDEX,
+from xtuner.utils import (DEFAULT_IMAGE_TOKEN, IMAGE_TOKEN_INDEX, DEFAULT_VIDEO_TOKEN, VIDEO_TOKEN_INDEX,
                           StopWordStoppingCriteria)
 
 
@@ -36,6 +36,7 @@ class EvaluateChatHook(Hook):
                  stop_words=[]):
         self.frame_size=frame_size
         self.evaluation_inputs = evaluation_inputs
+        self.num_frames=video_frames
         if isinstance(self.evaluation_inputs, str):
             self.evaluation_inputs = [self.evaluation_inputs]
         self.evaluation_images = evaluation_images
@@ -64,7 +65,7 @@ class EvaluateChatHook(Hook):
                 self.evaluation_videos = [self.evaluation_videos[0]] * len(
                     self.evaluation_inputs_video)
             video_decode_backend = 'decord'
-            self.num_frames = video_frames
+            
             self.evaluation_videos = [
                 load_and_transform_video(video, get_video_transform(video_decode_backend=video_decode_backend,num_frames=self.num_frames, frame_size=self.frame_size),
                                                 video_decode_backend=video_decode_backend,
@@ -115,7 +116,7 @@ class EvaluateChatHook(Hook):
     def _save_eval_output(self, runner, eval_outputs):
         save_path = os.path.join(runner.log_dir, 'vis_data',
                                  f'eval_outputs_iter_{runner.iter}.txt')
-        with open(save_path, 'w') as f:
+        with open(save_path, 'w', encoding='utf-8') as f:
             for i, output in enumerate(eval_outputs):
                 f.write(f'Eval output {i + 1}:\n{output}\n\n')
 
@@ -191,11 +192,11 @@ class EvaluateChatHook(Hook):
         for sample_video, sample_video_input in zip(self.evaluation_videos,
                                                   self.evaluation_inputs_video):
 
-            sample_input = DEFAULT_IMAGE_TOKEN + '\n' + sample_video_input
+            sample_input = DEFAULT_VIDEO_TOKEN + '\n' + sample_video_input
             inputs = (self.system + self.instruction).format(
                 input=sample_input, round=1, **runner.cfg)
             chunk_encode = []
-            for idx, chunk in enumerate(inputs.split(DEFAULT_IMAGE_TOKEN)):
+            for idx, chunk in enumerate(inputs.split(DEFAULT_VIDEO_TOKEN)):
                 if idx == 0:
                     cur_encode = self.tokenizer.encode(chunk)
                 else:
@@ -207,7 +208,7 @@ class EvaluateChatHook(Hook):
             for idx, cur_chunk_encode in enumerate(chunk_encode):
                 input_ids.extend(cur_chunk_encode)
                 if idx != len(chunk_encode) - 1:
-                    input_ids.append(IMAGE_TOKEN_INDEX)
+                    input_ids.append(VIDEO_TOKEN_INDEX)
             input_ids = torch.tensor(input_ids).to(device)
             sample_video = sample_video.permute(1,0,2,3).to(device)
             visual_outputs = model.visual_encoder(
@@ -283,14 +284,14 @@ class EvaluateChatHook(Hook):
         model.llm.config.use_cache = True
         model.eval()
         print(self.evaluation_images, self.evaluation_inputs)
+        print(self.evaluation_inputs_video)
+        # with torch.no_grad():
+        if self.evaluation_videos is not None:
+            self._eval_videos(runner, model, device, max_new_tokens,
+                            save_eval_output)
         if self.evaluation_images is not None:
             self._eval_images(runner, model, device, max_new_tokens,
-                              save_eval_output)
-
-        elif self.evaluation_videos is not None:
-            self._eval_videos(runner, model, device, max_new_tokens,
-                              save_eval_output)
-            
+                            save_eval_output)
 
         else:
             self._eval_language(runner, model, device, max_new_tokens,

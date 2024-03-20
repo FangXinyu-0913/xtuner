@@ -12,6 +12,7 @@ from .utils import (LoadWoInit, find_all_linear_names,
                     get_peft_model_state_dict, guess_load_checkpoint,
                     make_inputs_require_grad,
                     prepare_inputs_labels_for_multimodal, traverse_dict)
+import time
 
 class CompressNet(nn.Module):
     def __init__(self, input_size):
@@ -128,6 +129,7 @@ class LLaVAModel(BaseModel):
 
     def gradient_checkpointing_enable(self):
         self.activation_checkpointing_enable()
+        print('activate gradient')
 
     def activation_checkpointing_enable(self):
         self.llm.gradient_checkpointing_enable()
@@ -182,14 +184,19 @@ class LLaVAModel(BaseModel):
             raise NotImplementedError
 
     def forward(self, data, data_samples=None, mode='loss'):
+        self.train()
         if 'pixel_values' in data:
 
             # print(data['pixel_values'].shape, data['instance_type'])
+            # start_time = time.perf_counter()
             visual_outputs = self.visual_encoder(
                 data['pixel_values'], output_hidden_states=True)
+            # print(visual_outputs.requires_grad)
+            # end_encoder_time = time.perf_counter()
             
             pixel_values = self.projector(
                 visual_outputs.hidden_states[self.visual_select_layer][:, 1:])
+            # end_projector_time = time.perf_counter()
             instance_type = data['instance_type']
             
             # print(f'after projection, pixel value shape: {pixel_values.shape}, instance list {instance_type}')
@@ -198,7 +205,12 @@ class LLaVAModel(BaseModel):
             # for item in data['instance_type']:
             del data['instance_type']
             data = prepare_inputs_labels_for_multimodal(llm=self.llm, instance_list=instance_type, video_frames=self.video_frames, **data)
+            
+            # end_prepare_inputs_labels_for_multimodal_time = time.perf_counter()
 
+            # print(f'visual_encoder:{end_encoder_time - start_time}\
+            #         projector:{end_projector_time - end_encoder_time}\
+            #         prepare_inputs_labels_for_multimodal: {end_prepare_inputs_labels_for_multimodal_time - end_projector_time}')
         if mode == 'loss':
             return self.compute_loss(data, data_samples)
         elif mode == 'predict':
@@ -220,9 +232,11 @@ class LLaVAModel(BaseModel):
         return logits_dict
 
     def compute_loss(self, data, data_samples=None):
-        # print(data)
+        # start_time = time.perf_counter()
         outputs = self.llm(**data)
         loss_dict = {'loss': outputs.loss}
+        # end_time = time.perf_counter()
+        # print(f'LLM time:{end_time - start_time}')
         return loss_dict
 
     def __getattr__(self, name: str):
