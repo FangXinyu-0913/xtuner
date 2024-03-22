@@ -186,19 +186,19 @@ train_cfg = dict(type=TrainLoop, max_epochs=max_epochs)
 # Log the dialogue periodically during the training process, optional
 custom_hooks = [
     dict(type=DatasetInfoHook, tokenizer=tokenizer),
-    # dict(
-    #     type=EvaluateChatHook,
-    #     tokenizer=tokenizer,
-    #     frame_size=frame_size,
-    #     image_processor=image_processor,
-    #     every_n_iters=evaluation_freq,
-    #     evaluation_videos=evaluation_videos,
-    #     evaluation_inputs_video=evaluation_inputs_video,
-    #     evaluation_inputs=evaluation_inputs,
-    #     evaluation_images=evaluation_images,
-    #     video_frames=video_frames,
-    #     system=SYSTEM,
-    #     prompt_template=prompt_template)
+    dict(
+        type=EvaluateChatHook,
+        tokenizer=tokenizer,
+        frame_size=frame_size,
+        image_processor=image_processor,
+        every_n_iters=evaluation_freq,
+        evaluation_videos=evaluation_videos,
+        evaluation_inputs_video=evaluation_inputs_video,
+        evaluation_inputs=evaluation_inputs,
+        evaluation_images=evaluation_images,
+        video_frames=video_frames,
+        system=SYSTEM,
+        prompt_template=prompt_template)
 ]
 
 # configure default hooks

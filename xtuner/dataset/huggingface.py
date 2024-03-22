@@ -221,14 +221,14 @@ def process(dataset,
     for old, new in rename_maps:
         dataset = dataset.rename_column(old, new)
 
-    image_count = 0
-    video_count = 0
-    for item in dataset:
-        if 'image' in item.keys() and item['image'] != '':
-            image_count+=1
-        if 'video' in item.keys() and item['video'] != '':
-            video_count+=1
-    print(f'after rename-image {image_count}, video {video_count}')
+    # image_count = 0
+    # video_count = 0
+    # for item in dataset:
+    #     if 'image' in item.keys() and item['image'] != '':
+    #         image_count+=1
+    #     if 'video' in item.keys() and item['video'] != '':
+    #         video_count+=1
+    # print(f'after rename-image {image_count}, video {video_count}')
 
     # remove unused columns
     if pack_to_max_length and (not remove_unused_columns):
@@ -239,14 +239,14 @@ def process(dataset,
             level=logging.WARNING)
         remove_unused_columns = True
     
-    image_count = 0
-    video_count = 0
-    for item in dataset:
-        if 'image' in item.keys() and item['image'] != '':
-            image_count+=1
-        if 'video' in item.keys() and item['video'] != '':
-            video_count+=1
-    print(f'after remove unused col-image {image_count}, video {video_count}')
+    # image_count = 0
+    # video_count = 0
+    # for item in dataset:
+    #     if 'image' in item.keys() and item['image'] != '':
+    #         image_count+=1
+    #     if 'video' in item.keys() and item['video'] != '':
+    #         video_count+=1
+    # print(f'after remove unused col-image {image_count}, video {video_count}')
 
     if do_dataset_tokenization:
         dataset = tokenize_dataset(dataset, tokenizer, max_length,
@@ -264,11 +264,11 @@ def process(dataset,
         image_count = 0
         video_count = 0
         for item in dataset:
-            if 'image' in item.keys():
+            if 'image' in item.keys() and item['image'] != '':
                 image_count+=1
-            if 'video' in item.keys():
+            if 'video' in item.keys() and item['video'] != '':
                 video_count+=1
-        # this changed
+        # TODO: FIX HERE
         print(f'after input_ids_with_output filter-image {image_count}, video {video_count}')
 
     # pack to max length

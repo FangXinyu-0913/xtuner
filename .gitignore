@@ -129,3 +129,4 @@ core.*
 0302-qlora-result/*
 old_work_dirs/*
 xtuner/configs/llava/internlm2_chat_7b_clip_vit_base_p16_224_video-notuse/test.py
+*.sh

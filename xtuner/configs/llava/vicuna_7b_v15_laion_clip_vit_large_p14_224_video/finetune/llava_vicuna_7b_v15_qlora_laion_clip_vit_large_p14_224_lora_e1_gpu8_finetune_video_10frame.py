@@ -31,7 +31,7 @@ pretrained_pth = '...'  # noqa: E501
 # Data
 data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/llava_image_tune/llava_v1_5_mix665k.json' #image_path
 image_folder = '/cpfs01/user/fangxinyu/Video-LLaVA/data'
-video_data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/videochatgpt_llavaimage_tune_sampledMinor.json' #sampledMinor modify_shuffle
+video_data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/videochatgpt_llavaimage_tune_modify_shuffle_v2.json' #sampledMinor modify_shuffle
 video_folder = '/cpfs01/user/fangxinyu/Video-LLaVA/data'
 # offline_data_folder_sampled='/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/sampled'
 # offline_data_folder_full='/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/vicuna_dataset_process/full_v1'

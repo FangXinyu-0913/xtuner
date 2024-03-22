@@ -27,9 +27,11 @@ visual_encoder_name_or_path = '/cpfs01/shared/llmeval/fangxinyu/hub/models--laio
 # Data
 data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/llava_image_tune/llava_v1_5_mix665k.json' #image_path
 image_folder = '/cpfs01/user/fangxinyu/Video-LLaVA/data'
-video_data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/valley_llavaimage_pretrain_sampledMinor.json' #sampledMinor modify_shuffle
+video_data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/valley_llavaimage_pretrain_modify_shuffle.json' #sampledMinor modify_shuffle
 video_folder = '/cpfs01/user/fangxinyu/Video-LLaVA/data'
 prompt_template = PROMPT_TEMPLATE.vicuna
+# offline_full_data_vicuna='/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/vicuna_dataset_process/full_v1'
+
 
 video_frames = 10
 video_batch_size = 12
@@ -104,6 +106,7 @@ model = dict(
 #######################################################################
 llava_dataset = dict(
     type=LLaVADataset,
+    # offline_processed_text_folder=offline_full_data_vicuna,
     data_path=data_path,
     image_folder=image_folder,
     video_data_path=video_data_path,

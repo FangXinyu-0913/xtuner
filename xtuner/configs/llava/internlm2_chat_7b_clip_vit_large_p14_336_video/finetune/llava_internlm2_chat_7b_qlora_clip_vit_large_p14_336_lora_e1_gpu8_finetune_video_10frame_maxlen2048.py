@@ -31,10 +31,10 @@ pretrained_pth = '/cpfs01/user/fangxinyu/work_dirs/epoch_1.pth'  # noqa: E501
 # data_root = './data/llava_data/'
 data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/llava_image_tune/llava_v1_5_mix665k.json' #image_path
 image_folder = '/cpfs01/user/fangxinyu/Video-LLaVA/data'
-video_data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/videochatgpt_llavaimage_tune_modify_shuffle.json'
+video_data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/videochatgpt_llavaimage_tune_modify_shuffle_v2.json'
 video_folder = '/cpfs01/user/fangxinyu/Video-LLaVA/data'
-offline_data_folder_sampled='/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/sampled'
-offline_data_folder_full='/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/Full-v1'
+# offline_data_folder_sampled='/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/sampled'
+offline_data_folder_full='/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/internlm2_dataset_process/llava_internlm2_chat_7b_qlora_clip_vit_large_p14_336_lora_e1_gpu8_finetune_video_10frame_maxlen2048/sft'
 prompt_template = PROMPT_TEMPLATE.internlm2_chat
 
 video_frames = 10
@@ -120,7 +120,7 @@ model = dict(
 #######################################################################
 llava_dataset = dict(
     type=LLaVADataset,
-    # offline_processed_text_folder=offline_data_folder_sampled,
+    offline_processed_text_folder=offline_data_folder_full,
     data_path=data_path,
     image_folder=image_folder,
     video_data_path = video_data_path,

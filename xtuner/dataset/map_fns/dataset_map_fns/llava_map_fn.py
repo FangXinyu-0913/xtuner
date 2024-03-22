@@ -1,5 +1,5 @@
 # Copyright (c) OpenMMLab. All rights reserved.
-from xtuner.utils import DEFAULT_IMAGE_TOKEN
+from xtuner.utils import DEFAULT_IMAGE_TOKEN, DEFAULT_VIDEO_TOKEN
 
 
 def llava_image_only_map_fn(example):
@@ -35,6 +35,11 @@ def llava_map_fn(example):
                 msg['value'] = msg['value'].replace(DEFAULT_IMAGE_TOKEN,
                                                     '').strip()
                 msg['value'] = DEFAULT_IMAGE_TOKEN + '\n' + msg['value']
+                msg['value'] = msg['value'].strip()
+            elif DEFAULT_VIDEO_TOKEN in msg['value']:
+                msg['value'] = msg['value'].replace(DEFAULT_VIDEO_TOKEN,
+                                                    '').strip()
+                msg['value'] = DEFAULT_VIDEO_TOKEN + '\n' + msg['value']
                 msg['value'] = msg['value'].strip()
             input += msg['value']
 
