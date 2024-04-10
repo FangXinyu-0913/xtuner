@@ -29,13 +29,15 @@ def video_collate_fn(instances: Sequence[Dict],
             pixel_values.append(example['image_pixel_values'])
             instances_type.append('image')
         
-    print(instances_type)    
-
-    input_ids = pad_sequence(
-        input_ids, batch_first=True, padding_value=pad_index)
-    labels = pad_sequence(
-        labels, batch_first=True, padding_value=IGNORE_INDEX)
-
+    # print(instances_type)    
+    try:
+        input_ids = pad_sequence(
+            input_ids, batch_first=True, padding_value=pad_index)
+        labels = pad_sequence(
+            labels, batch_first=True, padding_value=IGNORE_INDEX)
+    except:
+        print(batch_item)
+        raise
     
     if use_varlen_attn:
         indexes = torch.stack(indexes, dim=0)

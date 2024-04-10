@@ -13,6 +13,8 @@ from .utils import (LoadWoInit, find_all_linear_names,
                     make_inputs_require_grad,
                     prepare_inputs_labels_for_multimodal, traverse_dict)
 import time
+from torch.autograd import profiler
+from .chatuniviModel import ChatUniViMetaForCausalLM
 
 class CompressNet(nn.Module):
     def __init__(self, input_size):
@@ -39,7 +41,9 @@ class LLaVAModel(BaseModel):
                  projector_depth=2,
                  llm_lora=None,
                  visual_encoder_lora=None,
-                 use_activation_checkpointing=True):
+                 use_activation_checkpointing=True,
+                 mode='pretrain',
+                 enable_compress_tokens=False):
         super().__init__()
         self.freeze_llm = freeze_llm
         self.freeze_visual_encoder = freeze_visual_encoder
@@ -99,6 +103,41 @@ class LLaVAModel(BaseModel):
 
         self._is_init = True
 
+        self.model_args = {
+            'pretrain': {
+                
+                "use_cluster": True,
+                "freeze": False,
+                "vision_tune": False,
+
+                "spatial_cluster_rate0": 64,  # 0.25
+                "spatial_cluster_rate1": 32,  # 0.5
+                "spatial_cluster_rate2": 16,  # 0.5
+
+                "temporal_cluster_rate": 1/16,
+            },
+
+            'finetune':{
+
+                "use_cluster": True,
+                "freeze": False,
+                "mm_tune": True,
+                "vision_tune": False,
+
+                "spatial_cluster_rate0": 64,  # 0.25
+                "spatial_cluster_rate1": 32,  # 0.5
+                "spatial_cluster_rate2": 16,  # 0.5
+
+                "temporal_cluster_rate": 1/16,
+
+            }
+        }
+
+        self.config = {'mm_hidden_size': 256}
+        if enable_compress_tokens:
+            self.chat_univi_model = ChatUniViMetaForCausalLM(model_args=self.model_args[mode], config=self.config)
+        else:
+            self.chat_univi_model = None
         # self.video_compress = CompressNet([20,336,336])
 
     def _parse_lora_config(self, lora_config):
@@ -184,7 +223,7 @@ class LLaVAModel(BaseModel):
             raise NotImplementedError
 
     def forward(self, data, data_samples=None, mode='loss'):
-        self.train()
+        # self.train()
         if 'pixel_values' in data:
 
             # print(data['pixel_values'].shape, data['instance_type'])
@@ -204,7 +243,7 @@ class LLaVAModel(BaseModel):
             data['pixel_values'] = pixel_values
             # for item in data['instance_type']:
             del data['instance_type']
-            data = prepare_inputs_labels_for_multimodal(llm=self.llm, instance_list=instance_type, video_frames=self.video_frames, **data)
+            data = prepare_inputs_labels_for_multimodal(chatunivimodel = self.chat_univi_model, llm=self.llm, instance_list=instance_type, video_frames=self.video_frames, **data)
             
             # end_prepare_inputs_labels_for_multimodal_time = time.perf_counter()
 
@@ -233,8 +272,11 @@ class LLaVAModel(BaseModel):
 
     def compute_loss(self, data, data_samples=None):
         # start_time = time.perf_counter()
+        # with profiler.profile(use_cuda=True) as prof:
         outputs = self.llm(**data)
         loss_dict = {'loss': outputs.loss}
+        # print(prof.key_averages().table(sort_by="cuda_memory_usage", row_limit=10))
+        # prof.export_chrome_trace("trace.json")
         # end_time = time.perf_counter()
         # print(f'LLM time:{end_time - start_time}')
         return loss_dict

@@ -26,19 +26,19 @@ llm_name_or_path = '/cpfs01/shared/llmeval/dhd/hub/models--lmsys--vicuna-7b-v1.5
 visual_encoder_name_or_path = '/cpfs01/shared/llmeval/fangxinyu/hub/models--laion--CLIP-ViT-L-14-DataComp.XL-s13B-b90K'
 # visual_encoder_name_or_path = '/cpfs01/shared/llmeval/fangxinyu/CLIP-ViT-L-14-DataComp.XL-s13B-b90K'
 # Specify the pretrained pth
-pretrained_pth = '/cpfs01/user/fangxinyu/xtuner/work_dirs/llava_vicuna_7b_v15_laion_clip_vit_large_p14_224_e1_gpu8_pretrain_video/iter_8486.pth'  # noqa: E501
+pretrained_pth = '/cpfs01/user/fangxinyu/xtuner/work_dirs/llava_vicuna_7b_v15_laion_clip_vit_large_p14_224_e1_gpu8_pretrain_video_8frame/iter_7021.pth'  # noqa: E501
 
 # Data
 data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/llava_image_tune/llava_v1_5_mix665k.json' #image_path
 image_folder = '/cpfs01/user/fangxinyu/Video-LLaVA/data'
 video_data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/videochatgpt_llavaimage_tune_modify_shuffle_v2.json' #sampledMinor modify_shuffle
 video_folder = '/cpfs01/user/fangxinyu/Video-LLaVA/data'
-# offline_data_folder_sampled='/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/sampled'
+offline_data_folder_full='/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/vicuna_dataset_process/full_v2'
 # offline_data_folder_full='/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/vicuna_dataset_process/full_v1'
 prompt_template = PROMPT_TEMPLATE.vicuna
 
-video_frames = 10
-video_batch_size = 4
+video_frames = 8
+video_batch_size = 8
 image_batch_size = 24
 frame_size = 224
 pixel_size = 14
@@ -113,15 +113,16 @@ model = dict(
     visual_encoder=dict(
         type=CLIPVisionModel.from_pretrained,
         pretrained_model_name_or_path=visual_encoder_name_or_path),
-    visual_encoder_lora=dict(
-        type=LoraConfig, r=64, lora_alpha=16, lora_dropout=0.05, bias='none'))
+    # visual_encoder_lora=dict(
+    #     type=LoraConfig, r=64, lora_alpha=16, lora_dropout=0.05, bias='none')
+        )
 
 #######################################################################
 #                      PART 3  Dataset & Dataloader                   #
 #######################################################################
 llava_dataset = dict(
     type=LLaVADataset,
-    # offline_processed_text_folder=offline_data_folder_full,
+    offline_processed_text_folder=offline_data_folder_full,
     data_path=data_path,
     image_folder=image_folder,
     video_data_path=video_data_path,

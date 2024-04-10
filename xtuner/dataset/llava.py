@@ -170,16 +170,16 @@ class LLaVADataset(Dataset):
         
         
         for item in self.text_data:
-            if item.get('image', None) is not None and item['image'] != '':
+            if item.get('image', None) is not None and item['image'] != '' and len(item['input_ids']) > 0:
                 image_data.append(item)
-            elif item.get('video', None) is not None and item['video'] != '':
+            elif item.get('video', None) is not None and item['video'] != '' and len(item['input_ids']) > 0:
                 video_data.append(item)
-            else:
+            elif len(item['input_ids']) > 0:
                 image_data.append(item)
         if self.shuffle_dataset:
             random.shuffle(image_data)
             random.shuffle(video_data)
-
+        # image_data = [image_data]
         print(f'image data {len(image_data)}, video data {len(video_data)}\n')
 
         for i in range(0, len(image_data), self.image_batch_size):
@@ -256,7 +256,24 @@ class LLaVADataset(Dataset):
                 index_list.remove(idx)
                 pass
         
-        # print(f'batched_item[index_list] {len([batched_item[i]for i in index_list])}')
+        
+        if len([copyed_batched_item[i]for i in index_list]) == 0: #empty list, process it as only image
+            print(f'empty list from dataset.llava.getitem, process it as image')
+            print(copyed_batched_item)
+            instance_list = []
+            for idx, (data_dict) in enumerate(copyed_batched_item):
+                if data_dict.get('image', None) is not None and data_dict['image'] != '':
+                    instance_list.append(data_dict['image'])
+                elif data_dict.get('video', None) is not None and data_dict['video'] != '':
+                    instance_list.append(data_dict['video'])
+
+                crop_size = self.image_processor.crop_size
+                data_dict['image_pixel_values'] = torch.zeros(3, crop_size['height'],
+                                                        crop_size['width'])
+                
+            print(instance_list)
+            return copyed_batched_item
+
         return [copyed_batched_item[i]for i in index_list]
 
         # try:

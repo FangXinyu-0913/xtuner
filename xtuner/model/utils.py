@@ -5,6 +5,7 @@ from typing import List, Optional
 import torch
 from mmengine import print_log
 from mmengine.utils.misc import get_object_from_string
+from mmengine.model import BaseModel
 from peft import PeftType
 from torch import nn
 from transformers import PreTrainedModel
@@ -136,7 +137,8 @@ def prepare_inputs_labels_for_multimodal(
         attention_mask: Optional[torch.Tensor] = None,
         past_key_values: Optional[List[torch.FloatTensor]] = None,
         labels: Optional[torch.LongTensor] = None,
-        pixel_values: Optional[torch.FloatTensor] = None):
+        pixel_values: Optional[torch.FloatTensor] = None,
+        chatunivimodel: BaseModel = None):
     if pixel_values is None:
         return {
             'input_ids': input_ids,
@@ -224,20 +226,31 @@ def prepare_inputs_labels_for_multimodal(
                 if i < num_videos:
                     cur_pixel_values = pixel_values[cur_image_idx: cur_image_idx + video_frames]
                     cur_image_idx += video_frames
-                    for item in cur_pixel_values:
-                        #VIDEO Squeeze to IMAGE
-                        cur_new_inputs_embeds.append(item) #check here
+                    # merge video frames
+                    if chatunivimodel is None:
+                        for item in cur_pixel_values:
+                        #VIDEO as N * IMAGE, NOT COMPRSEE
+                            cur_new_inputs_embeds.append(item) #check here
+                            cur_new_labels.append(
+                                torch.full((item.shape[0], ),#report error here
+                                        IGNORE_INDEX,
+                                        device=cur_labels.device,
+                                        dtype=cur_labels.dtype))
+                    else:
+                        # merge video frames AND tokens in single frame
+                        cur_image_features = chatunivimodel(cur_pixel_values, input_type="video").squeeze(0)
+                        cur_image_features = cur_image_features.to(cur_inputs_embeds.dtype)
+                        cur_image_features = cur_image_features.to(cur_inputs_embeds.device)
+                        cur_new_inputs_embeds.append(cur_image_features)
                         cur_new_labels.append(
-                            torch.full((item.shape[0], ),#report error here
-                                    IGNORE_INDEX,
-                                    device=cur_labels.device,
-                                    dtype=cur_labels.dtype))
+                                torch.full((cur_image_features.shape[0], ),#report error here
+                                        IGNORE_INDEX,
+                                        device=cur_labels.device,
+                                        dtype=cur_labels.dtype))
+                    
+
         
         elif num_images > 0:
-            # print(f'num_images:{num_images}')
-            # import ipdb
-            # ipdb.set_trace()
-            # print(pixel_values)
             image_token_indices = [-1] + torch.where(
                 cur_input_ids == IMAGE_TOKEN_INDEX)[0].tolist() + [
                     cur_input_ids.shape[0]
@@ -267,12 +280,24 @@ def prepare_inputs_labels_for_multimodal(
                     cur_pixel_values = pixel_values[cur_image_idx]
                     # print(f'pixel shape: {cur_pixel_values.shape}')
                     cur_image_idx += 1
-                    cur_new_inputs_embeds.append(cur_pixel_values)
-                    cur_new_labels.append(
-                        torch.full((cur_pixel_values.shape[0], ),
-                                IGNORE_INDEX,
-                                device=cur_labels.device,
-                                dtype=cur_labels.dtype))
+                    if chatunivimodel is None:
+                        cur_new_inputs_embeds.append(cur_pixel_values)
+                        cur_new_labels.append(
+                            torch.full((cur_pixel_values.shape[0], ),
+                                    IGNORE_INDEX,
+                                    device=cur_labels.device,
+                                    dtype=cur_labels.dtype))
+                    else:
+                        cur_image_features = chatunivimodel(cur_pixel_values.unsqueeze(0), input_type="image").squeeze(0)
+                        cur_image_features = cur_image_features.to(cur_inputs_embeds.dtype)
+                        cur_image_features = cur_image_features.to(cur_inputs_embeds.device)
+                        cur_new_inputs_embeds.append(cur_image_features)
+                        cur_new_labels.append(
+                            torch.full((cur_image_features.shape[0], ),
+                                    IGNORE_INDEX,
+                                    device=cur_labels.device,
+                                    dtype=cur_labels.dtype))
+
 
         cur_new_inputs_embeds = torch.cat(cur_new_inputs_embeds)
         cur_new_labels = torch.cat(cur_new_labels)

@@ -37,7 +37,7 @@ video_folder = '/cpfs01/user/fangxinyu/Video-LLaVA/data'
 # offline_data_folder_full='/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/vicuna_dataset_process/full_v1'
 prompt_template = PROMPT_TEMPLATE.vicuna
 
-video_frames = 10
+video_frames = 16
 video_batch_size = 4
 image_batch_size = 24
 frame_size = 224
