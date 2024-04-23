@@ -131,7 +131,6 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name='default'):
 def prepare_inputs_labels_for_multimodal(
         llm: PreTrainedModel,
         video_frames: Optional[int] = 10,
-        instance_list: List[str] = ['image'],
         input_ids: torch.LongTensor = None,
         position_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
@@ -175,7 +174,7 @@ def prepare_inputs_labels_for_multimodal(
     new_inputs_embeds = []
     new_labels = []
     cur_image_idx = 0
-    for batch_idx, (cur_input_ids, instance) in enumerate(zip(input_ids,instance_list)):
+    for batch_idx, (cur_input_ids) in enumerate(input_ids):
         num_images = (cur_input_ids == IMAGE_TOKEN_INDEX).sum()
         num_videos = (cur_input_ids == VIDEO_TOKEN_INDEX).sum()
         #num_videos = # (cur_input_ids == VIDEO_TOKEN_INDEX).sum() 

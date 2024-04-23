@@ -33,7 +33,9 @@ class EvaluateChatHook(Hook):
                  max_new_tokens=600,
                  video_frames=8,
                  stop_word=None,
-                 stop_words=[]):
+                 stop_words=[],
+                 generation_kwargs={}):
+        
         self.frame_size=frame_size
         self.evaluation_inputs = evaluation_inputs
         self.num_frames=video_frames
@@ -96,8 +98,9 @@ class EvaluateChatHook(Hook):
         if image_processor is not None:
             self.image_processor = BUILDER.build(image_processor)
         self.stop_criteria = StoppingCriteriaList()
+
         # default generation config
-        self.gen_config = GenerationConfig(
+        default_generation_kwargs = dict(
             max_new_tokens=max_new_tokens,
             do_sample=True,
             temperature=0.1,
@@ -106,8 +109,10 @@ class EvaluateChatHook(Hook):
             eos_token_id=self.tokenizer.eos_token_id,
             pad_token_id=self.tokenizer.pad_token_id
             if self.tokenizer.pad_token_id is not None else
-            self.tokenizer.eos_token_id,
-        )
+            self.tokenizer.eos_token_id)
+        default_generation_kwargs.update(generation_kwargs)
+        self.gen_config = GenerationConfig(**default_generation_kwargs)
+
         self.stop_criteria = StoppingCriteriaList()
         for word in stop_words:
             self.stop_criteria.append(
@@ -156,7 +161,8 @@ class EvaluateChatHook(Hook):
                     input_ids.append(IMAGE_TOKEN_INDEX)
             input_ids = torch.tensor(input_ids).to(device)
             visual_outputs = model.visual_encoder(
-                image.unsqueeze(0), output_hidden_states=True)
+                image.unsqueeze(0).to(model.visual_encoder.dtype),
+                output_hidden_states=True)
             pixel_values = model.projector(
                 visual_outputs.hidden_states[model.visual_select_layer][:, 1:])
 
@@ -220,8 +226,7 @@ class EvaluateChatHook(Hook):
                 llm=model.llm,
                 video_frames=self.num_frames,
                 input_ids=input_ids.unsqueeze(0),
-                pixel_values=pixel_values,
-                instance_list=['video'])
+                pixel_values=pixel_values)
 
             generation_output = model.generate(
                 **mm_inputs,

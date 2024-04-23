@@ -1,13 +1,17 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+import math
 from collections import OrderedDict
 
+import torch
 import torch.nn as nn
 from mmengine.config import Config, ConfigDict
 from mmengine.model import BaseModel
 from peft import get_peft_model, prepare_model_for_kbit_training
+from transformers import AutoConfig
 
 from xtuner.registry import BUILDER
 from .modules import ProjectorConfig, ProjectorModel, dispatch_modules
+from .modules.dispatch import SUPPORT_FLASH1, SUPPORT_FLASH2
 from .utils import (LoadWoInit, find_all_linear_names,
                     get_peft_model_state_dict, guess_load_checkpoint,
                     make_inputs_require_grad,
@@ -43,11 +47,16 @@ class LLaVAModel(BaseModel):
                  visual_encoder_lora=None,
                  use_activation_checkpointing=True,
                  mode='pretrain',
-                 enable_compress_tokens=False):
+                 enable_compress_tokens=False,
+                 max_position_embeddings=None):
+        
         super().__init__()
         self.freeze_llm = freeze_llm
         self.freeze_visual_encoder = freeze_visual_encoder
         with LoadWoInit():
+            if isinstance(llm, dict):
+                llm = self._dispatch_lm_model_cfg(llm, max_position_embeddings)
+
             self.llm = self._build_from_cfg_or_module(llm)
             self.visual_encoder = self._build_from_cfg_or_module(
                 visual_encoder)
@@ -213,6 +222,62 @@ class LLaVAModel(BaseModel):
              for k, v in state_dict.items() if 'projector.' in k})
         return to_return
 
+    @staticmethod
+    def _prepare_for_long_context_training(cfg, llm_cfg,
+                                           max_position_embeddings):
+
+        orig_rope_scaling = getattr(llm_cfg, 'rope_scaling', None)
+        if orig_rope_scaling is None:
+            orig_rope_scaling = {'factor': 1}
+
+        orig_rope_scaling_factor = orig_rope_scaling[
+            'factor'] if 'factor' in orig_rope_scaling.keys() else 1
+        orig_ctx_len = getattr(llm_cfg, 'max_position_embeddings', None)
+        if orig_ctx_len:
+            orig_ctx_len *= orig_rope_scaling_factor
+            if max_position_embeddings > orig_ctx_len:
+                scaling_factor = float(
+                    math.ceil(max_position_embeddings / orig_ctx_len))
+                llm_cfg.rope_scaling = {
+                    'type': 'linear',
+                    'factor': scaling_factor
+                }
+
+        # hardcode for internlm2
+        llm_cfg.attn_implementation = 'flash_attention_2'
+        cfg.config = llm_cfg
+
+        return cfg, llm_cfg
+
+    @staticmethod
+    def _prepare_for_flash_attn(cfg, llm_cfg):
+        cls_name = type(llm_cfg).__name__
+        SUPPORT_SDPA_ATTN = ('LlamaConfig', 'GemmaConfig', 'MistralConfig',
+                             'MixtralConfig', 'Qwen2Config',
+                             'Starcoder2Config', 'Starcoder2Config')
+        SUPPORT_FLASH_ATTN2 = ('InternLM2Config', 'LlamaConfig', 'GemmaConfig',
+                               'MistralConfig', 'MixtralConfig', 'Qwen2Config',
+                               'Starcoder2Config', 'Starcoder2Config')
+
+        if SUPPORT_FLASH2 and cls_name in SUPPORT_FLASH_ATTN2:
+            cfg.torch_dtype = torch.bfloat16 \
+                if torch.cuda.is_bf16_supported() else torch.float16
+            cfg.attn_implementation = 'flash_attention_2'
+        elif SUPPORT_FLASH1 and cls_name in SUPPORT_SDPA_ATTN:
+            cfg.attn_implementation = 'sdpa'
+
+        return cfg, llm_cfg
+
+    def _dispatch_lm_model_cfg(self, cfg, max_position_embeddings=None):
+        pretrained_model_name_or_path = cfg.pretrained_model_name_or_path
+        llm_cfg = AutoConfig.from_pretrained(
+            pretrained_model_name_or_path, trust_remote_code=True)
+        cfg, llm_cfg = self._prepare_for_flash_attn(cfg, llm_cfg)
+        if max_position_embeddings is not None:
+            cfg, llm_cfg = self._prepare_for_long_context_training(
+                cfg, llm_cfg, max_position_embeddings)
+        return cfg
+
     def _build_from_cfg_or_module(self, cfg_or_mod):
         if isinstance(cfg_or_mod, nn.Module):
             return cfg_or_mod
@@ -229,21 +294,17 @@ class LLaVAModel(BaseModel):
             # print(data['pixel_values'].shape, data['instance_type'])
             # start_time = time.perf_counter()
             visual_outputs = self.visual_encoder(
-                data['pixel_values'], output_hidden_states=True)
-            # print(visual_outputs.requires_grad)
-            # end_encoder_time = time.perf_counter()
-            
+                data['pixel_values'].to(self.visual_encoder.dtype), output_hidden_states=True)
             pixel_values = self.projector(
                 visual_outputs.hidden_states[self.visual_select_layer][:, 1:])
             # end_projector_time = time.perf_counter()
-            instance_type = data['instance_type']
+            
             
             # print(f'after projection, pixel value shape: {pixel_values.shape}, instance list {instance_type}')
 
             data['pixel_values'] = pixel_values
             # for item in data['instance_type']:
-            del data['instance_type']
-            data = prepare_inputs_labels_for_multimodal(chatunivimodel = self.chat_univi_model, llm=self.llm, instance_list=instance_type, video_frames=self.video_frames, **data)
+            data = prepare_inputs_labels_for_multimodal(llm=self.llm, video_frames=self.video_frames, **data)
             
             # end_prepare_inputs_labels_for_multimodal_time = time.perf_counter()
 

@@ -110,12 +110,10 @@ class LLaVADataset(Dataset):
 
     def get_batched_mix_image_video(self):
         #one batch might be: [image, image, video, video] or [image, ..., image] or [video, video, video, video]
-        #mix video and image
-        #adopt to self.remix_batch_size
+        
         batched_data = []
         image_data = []
         video_data = []
-        
         
         for item in self.text_data:
             if item.get('image', None) is not None and item['image'] != '':
@@ -162,12 +160,10 @@ class LLaVADataset(Dataset):
 
     def get_batched_image_OR_video(self):
         #one batch might be: [image, ..., image] or [video, video, video, video]
-        #mix video and image
-        #adopt to self.remix_batch_size
+
         batched_data = []
         image_data = []
         video_data = []
-        
         
         for item in self.text_data:
             if item.get('image', None) is not None and item['image'] != '' and len(item['input_ids']) > 0:
@@ -179,7 +175,6 @@ class LLaVADataset(Dataset):
         if self.shuffle_dataset:
             random.shuffle(image_data)
             random.shuffle(video_data)
-        # image_data = [image_data]
         print(f'image data {len(image_data)}, video data {len(video_data)}\n')
 
         for i in range(0, len(image_data), self.image_batch_size):
@@ -274,7 +269,7 @@ class LLaVADataset(Dataset):
             print(instance_list)
             return copyed_batched_item
 
-        return [copyed_batched_item[i]for i in index_list]
+        return [copyed_batched_item[i] for i in index_list]
 
         # try:
         # batch_size = 5
@@ -325,4 +320,32 @@ class LLaVADataset(Dataset):
         # video_batch = random.sample(video_batch, batch_size)
         
         # return image_batch, video_batch
+    
+        '''
+        ORG __getitem__
 
+        data_dict = self.text_data[index]
+        if data_dict.get('image', None) is not None:
+            image_file = data_dict['image']
+            image = Image.open(os.path.join(self.image_folder,
+                                            image_file)).convert('RGB')
+            if self.pad_image_to_square:
+                image = expand2square(
+                    image,
+                    tuple(
+                        int(x * 255) for x in self.image_processor.image_mean))
+            image = self.image_processor.preprocess(
+                image, return_tensors='pt')['pixel_values'][0]
+            data_dict['pixel_values'] = image
+        else:
+            if hasattr(self.image_processor, 'crop_size'):
+                crop_size = self.image_processor.crop_size
+            else:
+                crop_size = self.image_processor.size
+            data_dict['pixel_values'] = torch.zeros(3, crop_size['height'],
+                                                    crop_size['width'])
+        return data_dict
+
+        '''
+
+        

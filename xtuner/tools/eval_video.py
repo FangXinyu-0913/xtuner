@@ -191,9 +191,8 @@ def main():
                 visual_outputs.hidden_states[model.visual_select_layer][:, 1:])
 
             new_data['pixel_values'] = pixel_values
-            instance_type = ['video']
 
-            mm_inputs = prepare_inputs_labels_for_multimodal(llm=model.llm, instance_list=instance_type, video_frames=cfg.video_frames, **new_data)
+            mm_inputs = prepare_inputs_labels_for_multimodal(llm=model.llm, video_frames=cfg.video_frames, **new_data)
             generation_output = model.generate(
                 **mm_inputs,
                 max_new_tokens=max_new_tokens,
