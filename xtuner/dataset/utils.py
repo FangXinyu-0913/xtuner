@@ -23,6 +23,9 @@ import decord
 from decord import VideoReader, cpu
 decord.bridge.set_bridge('torch')
 
+import torch
+import os
+
 def get_bos_eos_token_ids(tokenizer):
     if tokenizer.__class__.__name__ in [
             'QWenTokenizer', 'QWen2Tokenizer', 'Qwen2TokenizerFast'
@@ -295,8 +298,56 @@ def decode_base64_to_image(base64_string):
 
 OPENAI_DATASET_MEAN = (0.48145466, 0.4578275, 0.40821073)
 OPENAI_DATASET_STD = (0.26862954, 0.26130258, 0.27577711)
-def get_video_transform(video_decode_backend, num_frames, frame_size = 336):
 
+MAX_IMAGE_LENGTH = 64
+def _get_rawvideo_dec(video_path, image_processor, max_frames=MAX_IMAGE_LENGTH, image_resolution=224, video_framerate=1, s=None, e=None):
+    # speed up video decode via decord.
+
+    if s is None:
+        start_time, end_time = None, None
+    else:
+        start_time = int(s)
+        end_time = int(e)
+        start_time = start_time if start_time >= 0. else 0.
+        end_time = end_time if end_time >= 0. else 0.
+        if start_time > end_time:
+            start_time, end_time = end_time, start_time
+        elif start_time == end_time:
+            end_time = start_time + 1
+
+    if os.path.exists(video_path):
+        vreader = VideoReader(video_path, ctx=cpu(0))
+    else:
+        print(video_path)
+        raise FileNotFoundError
+
+    fps = vreader.get_avg_fps()
+    f_start = 0 if start_time is None else int(start_time * fps)
+    f_end = int(min(1000000000 if end_time is None else end_time * fps, len(vreader) - 1))
+    num_frames = f_end - f_start + 1
+    if num_frames > 0:
+        # T x 3 x H x W
+        sample_fps = int(video_framerate)
+        t_stride = int(round(float(fps) / sample_fps))
+
+        all_pos = list(range(f_start, f_end + 1, t_stride))
+        if len(all_pos) > max_frames:
+            sample_pos = [all_pos[_] for _ in np.linspace(0, len(all_pos) - 1, num=max_frames, dtype=int)]
+        else:
+            sample_pos = all_pos
+
+        patch_images = [Image.fromarray(f) for f in vreader.get_batch(sample_pos).detach().numpy()]
+
+        patch_images = torch.stack([image_processor.preprocess(img, return_tensors='pt')['pixel_values'][0] for img in patch_images])
+        slice_len = patch_images.shape[0]
+
+        return patch_images, slice_len
+    else:
+        print("video path: {} error.".format(video_path))
+
+
+
+def get_video_transform(video_decode_backend, num_frames, frame_size = 336):
     if video_decode_backend == 'pytorchvideo':
         transform = ApplyTransformToKey(
             key="video",
@@ -307,7 +358,7 @@ def get_video_transform(video_decode_backend, num_frames, frame_size = 336):
                     NormalizeVideo(mean=OPENAI_DATASET_MEAN, std=OPENAI_DATASET_STD),
                     ShortSideScale(size=frame_size),
                     CenterCropVideo(frame_size),
-                    RandomHorizontalFlipVideo(p=0.5),
+                    # RandomHorizontalFlipVideo(p=0.5),
                 ]
             ),
         )
@@ -321,7 +372,7 @@ def get_video_transform(video_decode_backend, num_frames, frame_size = 336):
                 NormalizeVideo(mean=OPENAI_DATASET_MEAN, std=OPENAI_DATASET_STD),
                 ShortSideScale(size=frame_size),
                 CenterCropVideo(frame_size),
-                RandomHorizontalFlipVideo(p=0.5),
+                # RandomHorizontalFlipVideo(p=0.5),
             ]
         )
 
@@ -333,7 +384,7 @@ def get_video_transform(video_decode_backend, num_frames, frame_size = 336):
                 NormalizeVideo(mean=OPENAI_DATASET_MEAN, std=OPENAI_DATASET_STD),
                 ShortSideScale(size=frame_size),
                 CenterCropVideo(frame_size),
-                RandomHorizontalFlipVideo(p=0.5),
+                # RandomHorizontalFlipVideo(p=0.5),
             ]
         )
     else:
@@ -364,10 +415,8 @@ def load_and_transform_video(
         decord.bridge.set_bridge('torch')
         decord_vr = VideoReader(video_path, ctx=cpu(0))
         duration = len(decord_vr)
-        # print(duration)
         frame_id_list = np.linspace(0, duration-1, num_frames, dtype=int)
         video_data = decord_vr.get_batch(frame_id_list)
-        # print(f'path:{video_path}, {video_data.shape}')
         video_data = video_data.permute(3, 0, 1, 2)  # (T, H, W, C) -> (C, T, H, W)
         video_outputs = transform(video_data)
 

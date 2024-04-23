@@ -26,7 +26,7 @@ llm_name_or_path = '/cpfs01/shared/llmeval/dhd/hub/models--lmsys--vicuna-7b-v1.5
 visual_encoder_name_or_path = '/cpfs01/shared/llmeval/fangxinyu/hub/models--laion--CLIP-ViT-L-14-DataComp.XL-s13B-b90K'
 # visual_encoder_name_or_path = '/cpfs01/shared/llmeval/fangxinyu/CLIP-ViT-L-14-DataComp.XL-s13B-b90K'
 # Specify the pretrained pth
-pretrained_pth = '/cpfs01/user/fangxinyu/xtuner/work_dirs/llava_vicuna_7b_v15_laion_clip_vit_large_p14_224_e1_gpu8_pretrain_video_16frame/iter_12075.pth'  # noqa: E501
+# pretrained_pth = '/cpfs01/user/fangxinyu/xtuner/work_dirs/llava_vicuna_7b_v15_laion_clip_vit_large_p14_224_e1_gpu8_pretrain_video/iter_8486.pth'  # noqa: E501
 
 # Data
 data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/llava_image_tune/llava_v1_5_mix665k.json' #image_path
@@ -87,7 +87,7 @@ model = dict(
     type=LLaVAModel,
     freeze_llm=True,
     freeze_visual_encoder=True,
-    pretrained_pth=pretrained_pth,
+    # pretrained_pth=pretrained_pth,
     video_frames=video_frames,
     llm=dict(
         type=AutoModelForCausalLM.from_pretrained,

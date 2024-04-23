@@ -45,6 +45,10 @@ def video_collate_fn(wrapped_instances: Sequence[Dict],
         if has_image and 'image_pixel_values' in example.keys():
             pixel_values.append(example['image_pixel_values'])
             # instances_type.append('image')
+            # if torch.any(example['image_pixel_values']):
+            #     instances_type.append('image')
+            # else:
+            #     instances_type.append('text')
         
     # print(instances_type)    
     ori_length = [len(ids) for ids in input_ids]
@@ -104,6 +108,7 @@ def video_collate_fn(wrapped_instances: Sequence[Dict],
     if has_image or has_video:
         pixel_values = torch.stack(pixel_values)
         data_dict['pixel_values'] = pixel_values
+        # data_dict['instance_type'] = instances_type
 
     if return_hf_format:
         return data_dict

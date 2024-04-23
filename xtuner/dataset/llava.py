@@ -18,7 +18,7 @@ from torch.utils.data import Dataset
 
 from xtuner.registry import BUILDER
 from .huggingface import process_hf_dataset
-from .utils import expand2square, load_and_transform_video, get_video_transform
+from .utils import expand2square, load_and_transform_video, get_video_transform, _get_rawvideo_dec
 import copy
 
 
@@ -41,7 +41,11 @@ class LLaVADataset(Dataset):
                  video_batch_size=4,
                  image_batch_size=20,
                  pad_image_to_square=False,
-                 shuffle_dataset=True):
+                 shuffle_dataset=True,
+                 frameNum_decision_sample=True,
+                 framerateps_decision_sample=False,
+                 max_frames=100,
+                 video_framerate=1):
         super().__init__()
         self.shuffle_dataset = shuffle_dataset
         
@@ -50,6 +54,11 @@ class LLaVADataset(Dataset):
         self.image_batch_size = image_batch_size
         self.remix_batch_size = {'image_num': 2, 'video_num': 2}
         self.frame_size = frame_size
+
+        self.frameNum_decision_sample = frameNum_decision_sample
+        self.framerateps_decision_sample = framerateps_decision_sample
+        self.max_frames = max_frames
+        self.video_framerate = video_framerate
 
 
         assert offline_processed_text_folder or (video_data_path and tokenizer)
@@ -234,11 +243,15 @@ class LLaVADataset(Dataset):
                     video_file = data_dict['video']
                     # print('video:', video_file)
                     video_decode_backend = 'decord'
-                    
                     video = load_and_transform_video(os.path.join(self.video_folder, video_file), 
-                                                    get_video_transform(video_decode_backend=video_decode_backend, num_frames=self.num_frames, frame_size=self.frame_size),
-                                                    video_decode_backend=video_decode_backend,
-                                                    num_frames=self.num_frames)
+                                                        get_video_transform(video_decode_backend=video_decode_backend, num_frames=self.num_frames, frame_size=self.frame_size),
+                                                        video_decode_backend=video_decode_backend,
+                                                        num_frames=self.num_frames)
+                    # if self.frameNum_decision_sample:
+                        
+                    # elif self.framerateps_decision_sample:
+                    #     video, slice_len = _get_rawvideo_dec(os.path.join(self.video_folder, video_file), self.image_processor, max_frames=self.max_frames, video_framerate=self.video_framerate)
+                        
                     # print(f'success get video')
                     data_dict['video_pixel_values'] = video
                     

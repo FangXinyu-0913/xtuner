@@ -309,6 +309,7 @@ class ChatUniViMetaForCausalLM(BaseModel):
         self.ctm3 = CTM(sample_ratio=model_args['temporal_cluster_rate'], embed_dim=self.config['mm_hidden_size'], dim_out=self.config['mm_hidden_size'], k=5)
         self.block3 = TCBlock(dim=self.config['mm_hidden_size'], num_heads=8)
     
+        # self.projector = projector
     # @abstractmethod
     # def get_model(self):
     #     pass
@@ -427,7 +428,8 @@ class ChatUniViMetaForCausalLM(BaseModel):
                 cluster_image_features.append(cur_token_dict2["x"])
 
             image_features = torch.cat(cluster_image_features, dim=1)
-            # image_features = image_features.to(self.mm_projector.weight.dtype)
+            # print('after image feat:', image_features.shape)
+            # image_features = image_features.to(self.projector.weight.dtype)
 
-        # image_features = self.mm_projector(image_features)
+        # image_features = self.projector(image_features)
         return image_features

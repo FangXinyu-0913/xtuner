@@ -20,6 +20,19 @@ import time
 from torch.autograd import profiler
 from .chatuniviModel import ChatUniViMetaForCausalLM
 
+from typing import List, Optional
+
+import torch
+from mmengine import print_log
+from mmengine.utils.misc import get_object_from_string
+from mmengine.model import BaseModel
+from peft import PeftType
+from torch import nn
+from transformers import PreTrainedModel
+
+from xtuner.utils import IGNORE_INDEX, IMAGE_TOKEN_INDEX, VIDEO_TOKEN_INDEX
+
+
 class CompressNet(nn.Module):
     def __init__(self, input_size):
         super(CompressNet, self).__init__()
@@ -142,7 +155,8 @@ class LLaVAModel(BaseModel):
             }
         }
 
-        self.config = {'mm_hidden_size': 256}
+        self.config = {'mm_hidden_size': 1024}
+        self.enable_compress_tokens = enable_compress_tokens
         if enable_compress_tokens:
             self.chat_univi_model = ChatUniViMetaForCausalLM(model_args=self.model_args[mode], config=self.config)
         else:
@@ -295,17 +309,22 @@ class LLaVAModel(BaseModel):
             # start_time = time.perf_counter()
             visual_outputs = self.visual_encoder(
                 data['pixel_values'].to(self.visual_encoder.dtype), output_hidden_states=True)
+            # end_encoder_time = time.perf_counter()
+            
+            # if self.enable_compress_tokens:
+            #     pixel_values = visual_outputs.hidden_states[self.visual_select_layer][:, 1:]
+            # else:
             pixel_values = self.projector(
                 visual_outputs.hidden_states[self.visual_select_layer][:, 1:])
             # end_projector_time = time.perf_counter()
             
-            
             # print(f'after projection, pixel value shape: {pixel_values.shape}, instance list {instance_type}')
-
             data['pixel_values'] = pixel_values
-            # for item in data['instance_type']:
+
+            # if self.enable_compress_tokens:
+            #     data = self.prepare_inputs_labels_for_multimodal(chatunivimodel = self.chat_univi_model, llm=self.llm, instance_list=instance_type, video_frames=self.video_frames, **data)
+            # else:
             data = prepare_inputs_labels_for_multimodal(llm=self.llm, video_frames=self.video_frames, **data)
-            
             # end_prepare_inputs_labels_for_multimodal_time = time.perf_counter()
 
             # print(f'visual_encoder:{end_encoder_time - start_time}\
@@ -347,3 +366,297 @@ class LLaVAModel(BaseModel):
             return super().__getattr__(name)
         except AttributeError:
             return getattr(self.llm, name)
+        
+
+    # def prepare_inputs_labels_for_multimodal(
+    #     self,
+    #     llm: PreTrainedModel,
+    #     video_frames: Optional[int] = 10,
+    #     instance_list: List[str] = ['image'],
+    #     input_ids: torch.LongTensor = None,
+    #     position_ids: Optional[torch.LongTensor] = None,
+    #     attention_mask: Optional[torch.Tensor] = None,
+    #     past_key_values: Optional[List[torch.FloatTensor]] = None,
+    #     labels: Optional[torch.LongTensor] = None,
+    #     pixel_values: Optional[torch.FloatTensor] = None,
+    #     chatunivimodel: BaseModel = None):
+    #     # projector: Optional[nn.Module] = None):
+    #     if pixel_values is None:
+    #         return {
+    #             'input_ids': input_ids,
+    #             'position_ids': position_ids,
+    #             'attention_mask': attention_mask,
+    #             'past_key_values': past_key_values,
+    #             'inputs_embeds': None,
+    #             'labels': labels
+    #         }
+
+    #     _labels = labels
+    #     _position_ids = position_ids
+    #     _attention_mask = attention_mask
+    #     if attention_mask is None:
+    #         attention_mask = torch.ones_like(input_ids, dtype=torch.bool)
+    #     else:
+    #         attention_mask = attention_mask.bool()
+    #     if position_ids is None:
+    #         position_ids = torch.arange(
+    #             0, input_ids.shape[1], dtype=torch.long, device=input_ids.device)
+    #     if labels is None:
+    #         labels = torch.full_like(input_ids, IGNORE_INDEX)
+
+    #     # remove the padding using attention_mask -- TODO: double check
+    #     input_ids = [
+    #         cur_input_ids[cur_attention_mask]
+    #         for cur_input_ids, cur_attention_mask in zip(input_ids, attention_mask)
+    #     ]
+    #     labels = [
+    #         cur_labels[cur_attention_mask]
+    #         for cur_labels, cur_attention_mask in zip(labels, attention_mask)
+    #     ]
+
+    #     new_inputs_embeds = []
+    #     new_labels = []
+    #     cur_image_idx = 0
+
+    #     split_sizes_overall = []
+    #     vision_feature_overall = []
+    #     overall_feat_after_proj_split_list = []
+    #     if chatunivimodel is not None:
+    #         for batch_idx, (cur_input_ids, instance) in enumerate(zip(input_ids, instance_list)):
+    #             num_images = (cur_input_ids == IMAGE_TOKEN_INDEX).sum()
+    #             num_videos = (cur_input_ids == VIDEO_TOKEN_INDEX).sum()
+    #             split_sizes_perinstance = []
+    #             vision_feat_perinstance = []
+    #             if num_videos > 0:
+    #                 for i in range(num_videos + 1):
+    #                     if i < num_videos:
+    #                         cur_pixel_values = pixel_values[cur_image_idx: cur_image_idx + video_frames]
+    #                         cur_image_idx += video_frames
+    #                         cur_image_features = chatunivimodel(cur_pixel_values, input_type="video").squeeze(0)
+    #                         # cur_image_features = cur_image_features.to(cur_inputs_embeds.dtype)
+    #                         # cur_image_features = cur_image_features.to(cur_inputs_embeds.device)
+    #                         split_sizes_perinstance.append(cur_image_features.shape[0])
+    #                         vision_feat_perinstance.append(cur_image_features)
+
+    #             if num_images > 0:
+    #                 for i in range(num_images + 1):
+    #                     if i < num_images:
+    #                         cur_pixel_values = pixel_values[cur_image_idx]
+    #                         cur_image_idx += 1
+    #                         cur_image_features = chatunivimodel(cur_pixel_values.unsqueeze(0), input_type="image").squeeze(0)
+    #                         # cur_image_features = cur_image_features.to(cur_inputs_embeds.dtype)
+    #                         # cur_image_features = cur_image_features.to(cur_inputs_embeds.device)
+    #                         split_sizes_perinstance.append(cur_image_features.shape[0])
+    #                         vision_feat_perinstance.append(cur_image_features)
+    #                         # print('cur_image_features.shape:',cur_image_features.shape)
+
+    #             if num_images == 0 and num_videos == 0:
+    #                 cur_pixel_values = pixel_values[cur_image_idx]
+    #                 cur_image_idx += 1
+    #                 # print(f'empty image:{num_images} video:{num_videos} instance {instance} cur_input_ids {cur_input_ids} pixel')
+    #                 ZERO_VISION_FEAT = torch.zeros(96, 1024).to(self.visual_encoder.device).to(self.visual_encoder.dtype)
+    #                 split_sizes_perinstance.append(ZERO_VISION_FEAT.shape[0])
+    #                 vision_feat_perinstance.append(ZERO_VISION_FEAT)
+                               
+    #             split_sizes_overall.append(split_sizes_perinstance)
+    #             vision_feature_overall.append(torch.cat(vision_feat_perinstance))
+
+    #         overall_feat_before_proj = torch.cat(vision_feature_overall)
+    #         overall_feat_after_proj = self.projector(overall_feat_before_proj)
+    #         overall_feat_after_proj_split = torch.split(overall_feat_after_proj, [lis for lists in split_sizes_overall for lis in lists], dim=0)
+    #         i = 0
+            
+    #         for split_sizes_perinstance in split_sizes_overall:
+    #             overall_feat_after_proj_split_list.append(overall_feat_after_proj_split[i:i+len(split_sizes_perinstance)])
+    #             i = i + len(split_sizes_perinstance)
+
+    #     cur_image_idx = 0
+    #     # print(chatunivimodel)
+
+    #     if len(overall_feat_after_proj_split_list) == 0:
+    #         overall_feat_after_proj_split_list = [torch.zeros(96, 1)] * len(instance_list)
+    #     for batch_idx, (cur_input_ids, instance, vision_feat_perinstance) in enumerate(zip(input_ids, instance_list, overall_feat_after_proj_split_list)):
+    #         num_images = (cur_input_ids == IMAGE_TOKEN_INDEX).sum()
+    #         num_videos = (cur_input_ids == VIDEO_TOKEN_INDEX).sum()
+
+    #         if num_images == 0 and num_videos == 0:
+    #             cur_pixel_values = pixel_values[cur_image_idx]
+    #             # print(cur_pixel_values[0:0].shape)
+    #             cur_inputs_embeds_1 = llm.get_input_embeddings()(cur_input_ids)
+    #             cur_inputs_embeds = torch.cat(
+    #                 [cur_inputs_embeds_1], dim=0)
+    #             new_inputs_embeds.append(cur_inputs_embeds)
+    #             new_labels.append(labels[batch_idx])
+    #             cur_image_idx += 1
+    #             continue
+
+            
+    #         if num_videos > 0:
+    #             video_token_indices =  [-1] + torch.where(       #[-1, 4, cur_input_ids.shape[0]]
+    #                 cur_input_ids == VIDEO_TOKEN_INDEX)[0].tolist() + [
+    #                     cur_input_ids.shape[0]
+    #                 ]
+
+    #             cur_input_ids_noim = []
+    #             cur_labels = labels[batch_idx]
+    #             cur_labels_noim = []
+    #             for i in range(len(video_token_indices) - 1):
+    #                 cur_input_ids_noim.append(cur_input_ids[video_token_indices[i] +
+    #                                                         1:video_token_indices[i +
+    #                                                                             1]])
+    #                 cur_labels_noim.append(cur_labels[video_token_indices[i] +
+    #                                                 1:video_token_indices[i + 1]])
+                
+    #             split_sizes = [x.shape[0] for x in cur_labels_noim]
+    #             cur_inputs_embeds = llm.get_input_embeddings()(
+    #                 torch.cat(cur_input_ids_noim))
+    #             cur_inputs_embeds_no_im = torch.split(
+    #                 cur_inputs_embeds, split_sizes, dim=0)
+    #             cur_new_inputs_embeds = []
+    #             cur_new_labels = []
+
+
+    #             for i in range(num_videos + 1):
+    #                 cur_new_inputs_embeds.append(cur_inputs_embeds_no_im[i])
+    #                 cur_new_labels.append(cur_labels_noim[i])
+    #                 if i < num_videos:
+    #                     cur_pixel_values = pixel_values[cur_image_idx: cur_image_idx + video_frames]
+    #                     cur_image_idx += video_frames
+    #                     # merge video frames
+    #                     if chatunivimodel is None:
+    #                         for item in cur_pixel_values:
+    #                         #VIDEO as N * IMAGE, NOT COMPRSEE
+    #                             cur_new_inputs_embeds.append(item) #check here
+    #                             cur_new_labels.append(
+    #                                 torch.full((item.shape[0], ),#report error here
+    #                                         IGNORE_INDEX,
+    #                                         device=cur_labels.device,
+    #                                         dtype=cur_labels.dtype))
+    #                     else:
+    #                         cur_new_inputs_embeds.append(vision_feat_perinstance[i])
+    #                         cur_new_labels.append(
+    #                                 torch.full((vision_feat_perinstance[i].shape[0], ),#report error here
+    #                                         IGNORE_INDEX,
+    #                                         device=cur_labels.device,
+    #                                         dtype=cur_labels.dtype))
+                        
+
+            
+    #         elif num_images > 0:
+    #             image_token_indices = [-1] + torch.where(
+    #                 cur_input_ids == IMAGE_TOKEN_INDEX)[0].tolist() + [
+    #                     cur_input_ids.shape[0]
+    #                 ]
+    #             # print(f'image token indices: {image_token_indices}, {cur_input_ids}')
+    #             cur_input_ids_noim = []
+    #             cur_labels = labels[batch_idx]
+    #             cur_labels_noim = []
+    #             for i in range(len(image_token_indices) - 1):
+    #                 cur_input_ids_noim.append(cur_input_ids[image_token_indices[i] +
+    #                                                         1:image_token_indices[i +
+    #                                                                             1]])
+    #                 cur_labels_noim.append(cur_labels[image_token_indices[i] +
+    #                                                 1:image_token_indices[i + 1]])
+    #             split_sizes = [x.shape[0] for x in cur_labels_noim]
+    #             cur_inputs_embeds = llm.get_input_embeddings()(
+    #                 torch.cat(cur_input_ids_noim))
+    #             cur_inputs_embeds_no_im = torch.split(
+    #                 cur_inputs_embeds, split_sizes, dim=0)
+    #             cur_new_inputs_embeds = []
+    #             cur_new_labels = []
+
+    #             for i in range(num_images + 1):
+    #                 cur_new_inputs_embeds.append(cur_inputs_embeds_no_im[i])
+    #                 cur_new_labels.append(cur_labels_noim[i])
+    #                 if i < num_images:
+    #                     cur_pixel_values = pixel_values[cur_image_idx]
+    #                     cur_image_idx += 1
+    #                     if chatunivimodel is None:
+    #                         cur_new_inputs_embeds.append(cur_pixel_values)
+    #                         cur_new_labels.append(
+    #                             torch.full((cur_pixel_values.shape[0], ),
+    #                                     IGNORE_INDEX,
+    #                                     device=cur_labels.device,
+    #                                     dtype=cur_labels.dtype))
+    #                     else:
+    #                         # cur_image_features = chatunivimodel(cur_pixel_values.unsqueeze(0), input_type="image").squeeze(0)
+    #                         # cur_image_features = cur_image_features.to(cur_inputs_embeds.dtype)
+    #                         # cur_image_features = cur_image_features.to(cur_inputs_embeds.device)
+    #                         # cur_image_features = self.projector(cur_image_features)
+    #                         cur_new_inputs_embeds.append(vision_feat_perinstance[i])
+    #                         cur_new_labels.append(
+    #                             torch.full((vision_feat_perinstance[i].shape[0], ),
+    #                                     IGNORE_INDEX,
+    #                                     device=cur_labels.device,
+    #                                     dtype=cur_labels.dtype))
+
+
+    #         cur_new_inputs_embeds = torch.cat(cur_new_inputs_embeds)
+    #         cur_new_labels = torch.cat(cur_new_labels)
+
+    #         new_inputs_embeds.append(cur_new_inputs_embeds)
+    #         new_labels.append(cur_new_labels)
+
+    #     # Combine them
+    #     max_len = max(x.shape[0] for x in new_inputs_embeds)
+    #     batch_size = len(new_inputs_embeds)
+
+    #     new_inputs_embeds_padded = []
+    #     new_labels_padded = torch.full((batch_size, max_len),
+    #                                 IGNORE_INDEX,
+    #                                 dtype=new_labels[0].dtype,
+    #                                 device=new_labels[0].device)
+    #     attention_mask = torch.zeros((batch_size, max_len),
+    #                                 dtype=attention_mask.dtype,
+    #                                 device=attention_mask.device)
+    #     position_ids = torch.zeros((batch_size, max_len),
+    #                             dtype=position_ids.dtype,
+    #                             device=position_ids.device)
+
+    #     for i, (cur_new_embed,
+    #             cur_new_labels) in enumerate(zip(new_inputs_embeds, new_labels)):
+    #         cur_len = cur_new_embed.shape[0]
+    #         new_inputs_embeds_padded.append(
+    #             torch.cat((cur_new_embed,
+    #                     torch.zeros((max_len - cur_len, cur_new_embed.shape[1]),
+    #                                 dtype=cur_new_embed.dtype,
+    #                                 device=cur_new_embed.device)),
+    #                     dim=0))
+    #         if cur_len > 0:
+    #             new_labels_padded[i, :cur_len] = cur_new_labels
+    #             attention_mask[i, :cur_len] = True
+    #             position_ids[i, :cur_len] = torch.arange(
+    #                 0,
+    #                 cur_len,
+    #                 dtype=position_ids.dtype,
+    #                 device=position_ids.device)
+
+    #     new_inputs_embeds = torch.stack(new_inputs_embeds_padded, dim=0)
+
+    #     if _labels is None:
+    #         new_labels = None
+    #     else:
+    #         new_labels = new_labels_padded
+
+    #     if _attention_mask is None:
+    #         attention_mask = None
+    #     else:
+    #         attention_mask = attention_mask.to(dtype=_attention_mask.dtype)
+
+    #     if _position_ids is None:
+    #         position_ids = None
+    #     # try:
+    #     #     print(new_inputs_embeds.shape, new_labels.shape)
+    #     # except:
+    #     #     print('get failure')
+    #     # print(new_inputs_embeds.shape)
+    #     # print(position_ids.shape)
+    #     # print(new_inputs_embeds.requires_grad)
+    #     return {
+    #         'input_ids': None,
+    #         'position_ids': position_ids,
+    #         'attention_mask': attention_mask,
+    #         'past_key_values': past_key_values,
+    #         'inputs_embeds': new_inputs_embeds,
+    #         'labels': new_labels
+    #     }
