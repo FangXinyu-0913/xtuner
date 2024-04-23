@@ -1,10 +1,13 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+import torch
 from mmengine.hooks import (CheckpointHook, DistSamplerSeedHook, IterTimerHook,
                             LoggerHook, ParamSchedulerHook)
 from mmengine.optim import AmpOptimWrapper, CosineAnnealingLR, LinearLR
+from peft import LoraConfig
 from torch.optim import AdamW
 from transformers import (AutoModelForCausalLM, AutoTokenizer,
-                          CLIPImageProcessor, CLIPVisionModel)
+                          BitsAndBytesConfig, CLIPImageProcessor,
+                          CLIPVisionModel)
 
 from xtuner.dataset import LLaVADataset
 from xtuner.dataset.collate_fns import default_collate_fn
@@ -22,7 +25,7 @@ from xtuner.utils import PROMPT_TEMPLATE
 llm_name_or_path = 'meta-llama/Meta-Llama-3-8B-Instruct'
 visual_encoder_name_or_path = 'openai/clip-vit-large-patch14-336'
 # Specify the pretrained pth
-pretrained_pth = './work_dirs/llava_llama3_8b_instruct_clip_vit_large_p14_336_e1_gpu8_pretrain/iter_2181.pth'  # noqa: E501
+pretrained_pth = './work_dirs/llava_llama3_8b_instruct_quant_clip_vit_large_p14_336_e1_gpu1_pretrain/558128.pth'  # noqa: E501
 
 # Data
 data_root = './data/llava_data/'
@@ -32,23 +35,23 @@ prompt_template = PROMPT_TEMPLATE.llama3_chat
 max_length = int(2048 - (336 / 14)**2)
 
 # Scheduler & Optimizer
-batch_size = 8  # per_device
-accumulative_counts = 2
+batch_size = 1  # per_device
+accumulative_counts = 16
 dataloader_num_workers = 0
 max_epochs = 1
 optim_type = AdamW
-lr = 2e-5
+lr = 2e-4
 betas = (0.9, 0.999)
 weight_decay = 0
 max_norm = 1  # grad clip
 warmup_ratio = 0.03
 
 # Save
-save_steps = 1000
+save_steps = 50000
 save_total_limit = 2  # Maximum checkpoints to keep (-1 means unlimited)
 
 # Evaluate the generation performance during the training
-evaluation_freq = 1000
+evaluation_freq = 50000
 SYSTEM = ''
 evaluation_images = 'https://llava-vl.github.io/static/images/view.jpg'
 evaluation_inputs = ['请描述一下这张照片', 'Please describe this picture']
@@ -69,13 +72,30 @@ image_processor = dict(
 
 model = dict(
     type=LLaVAModel,
-    freeze_llm=False,
+    freeze_llm=True,
     freeze_visual_encoder=True,
     pretrained_pth=pretrained_pth,
     llm=dict(
         type=AutoModelForCausalLM.from_pretrained,
         pretrained_model_name_or_path=llm_name_or_path,
-        trust_remote_code=True),
+        trust_remote_code=True,
+        torch_dtype=torch.float16,
+        quantization_config=dict(
+            type=BitsAndBytesConfig,
+            load_in_4bit=True,
+            load_in_8bit=False,
+            llm_int8_threshold=6.0,
+            llm_int8_has_fp16_weight=False,
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type='nf4')),
+    llm_lora=dict(
+        type=LoraConfig,
+        r=64,
+        lora_alpha=16,
+        lora_dropout=0.05,
+        bias='none',
+        task_type='CAUSAL_LM'),
     visual_encoder=dict(
         type=CLIPVisionModel.from_pretrained,
         pretrained_model_name_or_path=visual_encoder_name_or_path))

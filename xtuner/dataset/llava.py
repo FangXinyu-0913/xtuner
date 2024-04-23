@@ -22,6 +22,15 @@ from .utils import expand2square, load_and_transform_video, get_video_transform,
 import copy
 
 
+def load_jsonl(json_file):
+    with open(json_file) as f:
+        lines = f.readlines()
+    data = []
+    for line in lines:
+        data.append(json.loads(line))
+    return data
+
+
 class LLaVADataset(Dataset):
 
     def __init__(self,
@@ -74,7 +83,12 @@ class LLaVADataset(Dataset):
         if offline_processed_text_folder is not None:
             self.text_data = load_from_disk(offline_processed_text_folder)
         else:
-            json_video_data = json.load(open(video_data_path))
+            if video_data_path.endswith('json'):
+                json_video_data = json.load(open(video_data_path))
+            elif video_data_path.endswith('jsonl'):
+                json_video_data = load_jsonl(video_data_path)
+            else:
+                raise NotImplementedError
             image_count = 0
             video_count = 0
             for item in json_video_data:
