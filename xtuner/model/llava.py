@@ -32,6 +32,7 @@ from transformers import PreTrainedModel
 
 from xtuner.utils import IGNORE_INDEX, IMAGE_TOKEN_INDEX, VIDEO_TOKEN_INDEX
 
+from ..InternVid.viclip import get_viclip, frames2tensor, get_vid_feat
 
 class CompressNet(nn.Module):
     def __init__(self, input_size):
@@ -59,6 +60,7 @@ class LLaVAModel(BaseModel):
                  llm_lora=None,
                  visual_encoder_lora=None,
                  use_activation_checkpointing=True,
+                 use_internvid=False,
                  mode='pretrain',
                  enable_compress_tokens=False,
                  max_position_embeddings=None):
@@ -66,23 +68,38 @@ class LLaVAModel(BaseModel):
         super().__init__()
         self.freeze_llm = freeze_llm
         self.freeze_visual_encoder = freeze_visual_encoder
+        self.use_internvid = use_internvid
         with LoadWoInit():
             if isinstance(llm, dict):
                 llm = self._dispatch_lm_model_cfg(llm, max_position_embeddings)
 
             self.llm = self._build_from_cfg_or_module(llm)
-            self.visual_encoder = self._build_from_cfg_or_module(
-                visual_encoder)
+            if not use_internvid:
+                self.visual_encoder = self._build_from_cfg_or_module(
+                    visual_encoder)
+                self.projector_visual_hidden_size = self.visual_encoder.config.hidden_size
+                self.visual_encoder_dtype = self.visual_encoder.dtype
+            else:
+                model_cfgs = {
+                    'viclip-l-internvid-10m-flt': {
+                        'size': 'l',
+                        'pretrained': '/cpfs01/user/fangxinyu/InternVideo/Data/InternVid/viclip/ViClip-InternVid-10M-FLT.pth', #HAVE!
+                    }
+                }
+                cfg = model_cfgs['viclip-l-internvid-10m-flt']
+                self.visual_encoder = get_viclip(cfg['size'], cfg['pretrained'])['viclip']
+                self.projector_visual_hidden_size = 768
+                self.visual_encoder_dtype = torch.float32
         self.llm.config.use_cache = False
         self.video_frames = video_frames
         dispatch_modules(self.llm)
 
         projector_config = ProjectorConfig(
-            visual_hidden_size=self.visual_encoder.config.hidden_size,
+            visual_hidden_size=self.projector_visual_hidden_size,
             llm_hidden_size=self.llm.config.hidden_size,
             depth=projector_depth)
         self.projector = ProjectorModel(projector_config).to(
-            self.visual_encoder.dtype)
+            self.visual_encoder_dtype)
 
         if self.freeze_llm:
             self.llm.requires_grad_(False)
@@ -96,12 +113,15 @@ class LLaVAModel(BaseModel):
             else:
                 self.llm.get_input_embeddings().register_forward_hook(
                     make_inputs_require_grad)
+            
             if hasattr(self.visual_encoder, 'enable_input_require_grads'):
                 self.visual_encoder.enable_input_require_grads()
             else:
                 self.visual_encoder.get_input_embeddings(
                 ).register_forward_hook(make_inputs_require_grad)
+            
             self.projector.enable_input_require_grads()
+            print('projector enable input require grads')
 
             # enable gradient (activation) checkpointing for memory efficiency
             self.gradient_checkpointing_enable()
@@ -307,16 +327,37 @@ class LLaVAModel(BaseModel):
 
             # print(data['pixel_values'].shape, data['instance_type'])
             # start_time = time.perf_counter()
-            visual_outputs = self.visual_encoder(
-                data['pixel_values'].to(self.visual_encoder.dtype), output_hidden_states=True)
-            # end_encoder_time = time.perf_counter()
-            
-            # if self.enable_compress_tokens:
-            #     pixel_values = visual_outputs.hidden_states[self.visual_select_layer][:, 1:]
+            # device = data['labels'].device
+            # if self.use_internvid and 'video' in data['instance_type']:
+            #     # frames_tensor = frames2tensor(data['pixel_values'], device)
+            #     print(data['pixel_values'].shape)
+            #     visual_outputs = get_vid_feat(data['pixel_values'], self.visual_encoder)
+            #     print(visual_outputs.shape)
+            #     raise
             # else:
-            pixel_values = self.projector(
-                visual_outputs.hidden_states[self.visual_select_layer][:, 1:])
+            # print(data['pixel_values'].shape)
+            # if self.use_siglip:
+            #     input = {'pixel_values': data['pixel_values'].to(dtype=torch.bfloat16), 'input_ids':torch.zeros(2,64).to(dtype=torch.long).to(device=data['pixel_values'].device)}
+            #     visual_outputs = self.visual_encoder(**input)
+            #     visual_outputs = visual_outputs.vision_model_output
+            # else:
+            visual_outputs = self.visual_encoder(
+                data['pixel_values'].to(self.visual_encoder_dtype), output_hidden_states=True)
+            # end_encoder_time = time.perf_counter()
+
+            # print('dtype of org data:',data['pixel_values'].dtype)
+            # print(f'self.visual_encoder_dtype:{self.visual_encoder_dtype}')
+            # print('visual_outputs after visual encoder dtype',visual_outputs.hidden_states[self.visual_select_layer].dtype)
+            
+            if self.enable_compress_tokens:
+                pixel_values = visual_outputs.hidden_states[self.visual_select_layer][:, 1:]
+            # elif self.use_internvid:
+            #     pixel_values = self.projector(visual_outputs)
+            else:
+                pixel_values = self.projector(
+                    visual_outputs.hidden_states[self.visual_select_layer][:, 1:])
             # end_projector_time = time.perf_counter()
+            # print(f'pixel value after projector dtype:{pixel_values.dtype}')
             
             # print(f'after projection, pixel value shape: {pixel_values.shape}, instance list {instance_type}')
             data['pixel_values'] = pixel_values
@@ -325,6 +366,9 @@ class LLaVAModel(BaseModel):
             #     data = self.prepare_inputs_labels_for_multimodal(chatunivimodel = self.chat_univi_model, llm=self.llm, instance_list=instance_type, video_frames=self.video_frames, **data)
             # else:
             data = prepare_inputs_labels_for_multimodal(llm=self.llm, video_frames=self.video_frames, **data)
+            # print('after prepare dtype and llm dtype:',data['inputs_embeds'].dtype, self.llm.dtype)
+            # data['inputs_embeds'].to(self.llm.dtype)
+            # print('after prepare and transform dtype:',data['inputs_embeds'].dtype)
             # end_prepare_inputs_labels_for_multimodal_time = time.perf_counter()
 
             # print(f'visual_encoder:{end_encoder_time - start_time}\
@@ -355,6 +399,7 @@ class LLaVAModel(BaseModel):
         # with profiler.profile(use_cuda=True) as prof:
         outputs = self.llm(**data)
         loss_dict = {'loss': outputs.loss}
+        # print(f'loss dtype: {outputs.loss.dtype}')
         # print(prof.key_averages().table(sort_by="cuda_memory_usage", row_limit=10))
         # prof.export_chrome_trace("trace.json")
         # end_time = time.perf_counter()

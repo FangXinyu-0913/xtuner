@@ -49,3 +49,14 @@ def llava_map_fn(example):
         else:
             raise NotImplementedError
     return {'conversation': conversation}
+
+
+def llava_videochat_sft_map_fn(example):
+    messages = example['QA']
+    conversation = []
+    for msg in messages:
+        msg['q'] = msg['q'].replace(DEFAULT_VIDEO_TOKEN,'').strip()
+        msg['q'] = DEFAULT_VIDEO_TOKEN + '\n' + msg['q']
+        msg['q'] = msg['q'].strip()
+        conversation.append({'input': msg['q'], 'output':msg['a']})
+    return {'conversation': conversation}

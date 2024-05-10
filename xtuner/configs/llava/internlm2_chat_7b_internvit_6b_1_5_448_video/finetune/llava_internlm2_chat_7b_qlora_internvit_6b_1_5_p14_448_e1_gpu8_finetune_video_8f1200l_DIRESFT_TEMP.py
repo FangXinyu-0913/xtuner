@@ -3,15 +3,16 @@ import torch
 from mmengine.hooks import (CheckpointHook, DistSamplerSeedHook, IterTimerHook,
                             LoggerHook, ParamSchedulerHook)
 from mmengine.optim import AmpOptimWrapper, CosineAnnealingLR, LinearLR
+from peft import LoraConfig
 from torch.optim import AdamW
 from transformers import (AutoModelForCausalLM, AutoTokenizer,
-                          BitsAndBytesConfig,
+                          BitsAndBytesConfig, AutoModel,
                           CLIPImageProcessor, CLIPVisionModel)
-from peft import LoraConfig
+
 from xtuner.dataset import LLaVADataset
 from xtuner.dataset.collate_fns import default_collate_fn, video_collate_fn
 from xtuner.dataset.map_fns import llava_map_fn, template_map_fn_factory
-from xtuner.dataset.samplers import LengthGroupedSampler, DefaultSampler
+from xtuner.dataset.samplers import LengthGroupedSampler, VideoLengthGroupedSampler, VideoImageSeperateBatchSampler
 from xtuner.engine.hooks import DatasetInfoHook, EvaluateChatHook
 from xtuner.engine.runner import TrainLoop
 from xtuner.model import LLaVAModel
@@ -21,34 +22,33 @@ from xtuner.utils import PROMPT_TEMPLATE
 #                          PART 1  Settings                           #
 #######################################################################
 # Model
-llm_name_or_path = '/cpfs01/shared/public/public_hdd/llmeval/model_weights/hf_hub/models--meta-llama--Meta-Llama-3-8B-Instruct/snapshots/1448453bdb895762499deb4176c1dd83b145fac1'
-visual_encoder_name_or_path = 'openai/clip-vit-large-patch14-336'
+llm_name_or_path = '/cpfs01/shared/llmeval/dhd/hub/models--internlm--internlm2-chat-7b/snapshots/2292b86b21cb856642782cebed0a453997453b1f'
+visual_encoder_name_or_path = '/cpfs01/shared/llmeval/fangxinyu/hub/models--OpenGVLab--InternViT-6B-448px-V1-5'
 # Specify the pretrained pth
-# pretrained_pth = './work_dirs/llava_llama3_8b_instruct_clip_vit_large_p14_336_e1_gpu8_pretrain/iter_2181.pth'  # noqa: E501
+# pretrained_pth = '/cpfs01/user/fangxinyu/xtuner/work_dirs/llava_llama3_8b_instruct_clip_vit_large_p14_336_e1_gpu8_pretrain_video_8f1472l_4v40I/iter_23713.pth'  # noqa: E501
 
 # Data
 data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/llava_image_tune/llava_v1_5_mix665k.json' #image_path
 image_folder = '/cpfs01/user/fangxinyu/Video-LLaVA/data'
-video_data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/videochatgpt_llavaimage_tune_modify_shuffle_v2.json'
+video_data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/videochatgpt_llavaimage_tune_sampledMinor.json'
 video_folder = '/cpfs01/user/fangxinyu/Video-LLaVA/data'
 # offline_data_full = '/cpfs01/shared/llmeval/fangxinyu/video_related_data/xtuner_offline_data/valley_llavaimage_pretrain_modify_shuffle_llama3_chat_1472l_llava_map_fn_offline'
-prompt_template = PROMPT_TEMPLATE.llama3_chat
+prompt_template = PROMPT_TEMPLATE.internlm2_chat
 
 # Scheduler & Optimizer
 video_frames = 8
-video_batch_size = 3
-image_batch_size = 10
-frame_size = 336
+video_batch_size = 2
+image_batch_size = 12
+frame_size = 448
 pixel_size = 14
-# max_length = int(2048 - (frame_size / pixel_size)**2) # 501 will OOM
-max_length = 384
+max_length = 1200
 
-batch_size = 1  # per_device
+batch_size = image_batch_size # per_device
 accumulative_counts = 1
-dataloader_num_workers = 0
+dataloader_num_workers = 4
 max_epochs = 1
 optim_type = AdamW
-lr = 2e-5
+lr = 2e-4
 betas = (0.9, 0.999)
 weight_decay = 0
 max_norm = 1  # grad clip
@@ -77,19 +77,20 @@ tokenizer = dict(
 
 image_processor = dict(
     type=CLIPImageProcessor.from_pretrained,
-    pretrained_model_name_or_path=visual_encoder_name_or_path,
-    trust_remote_code=True)
+    pretrained_model_name_or_path=visual_encoder_name_or_path)
 
 model = dict(
     type=LLaVAModel,
     freeze_llm=True,
     freeze_visual_encoder=True,
     video_frames=video_frames,
+    visual_select_layer=-1,
     llm=dict(
         type=AutoModelForCausalLM.from_pretrained,
         pretrained_model_name_or_path=llm_name_or_path,
         trust_remote_code=True,
         torch_dtype=torch.float16,
+        attn_implementation="flash_attention_2",
         quantization_config=dict(
             type=BitsAndBytesConfig,
             load_in_4bit=True,
@@ -106,9 +107,11 @@ model = dict(
         lora_dropout=0.05,
         bias='none',
         task_type='CAUSAL_LM'),
-    visual_encoder=dict(
-        type=CLIPVisionModel.from_pretrained,
-        pretrained_model_name_or_path=visual_encoder_name_or_path),
+    visual_encoder=dict(        
+        type=AutoModel.from_pretrained,
+        pretrained_model_name_or_path=visual_encoder_name_or_path,
+        torch_dtype = torch.bfloat16,
+        trust_remote_code=True),
     visual_encoder_lora=dict(
         type=LoraConfig, r=64, lora_alpha=16, lora_dropout=0.05, bias='none'))
         
@@ -137,12 +140,16 @@ llava_dataset = dict(
 train_dataloader = dict(
     batch_size=batch_size,
     num_workers=dataloader_num_workers,
+    pin_memory=True,
     dataset=llava_dataset,
-    sampler=dict(type=DefaultSampler, shuffle=True),
-    # sampler=dict(
-    #     type=LengthGroupedSampler,
-    #     length_property='modality_length',
-    #     per_device_batch_size=batch_size * accumulative_counts),
+    sampler=dict(
+        type=VideoLengthGroupedSampler, 
+        length_property='modality_length',
+        per_device_batch_size = batch_size * accumulative_counts,
+    ),
+    batch_sampler=dict(
+        type=VideoImageSeperateBatchSampler, video_batch_size=video_batch_size, drop_last=True
+    ),
     collate_fn=dict(type=video_collate_fn))
 
 #######################################################################

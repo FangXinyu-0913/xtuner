@@ -136,11 +136,22 @@ class EvaluateChatHook(Hook):
 
         for sample_image, sample_input in zip(self.evaluation_images,
                                               self.evaluation_inputs):
-            image = expand2square(
-                sample_image,
-                tuple(int(x * 255) for x in self.image_processor.image_mean))
-            image = self.image_processor.preprocess(
-                image, return_tensors='pt')['pixel_values'][0]
+            try:
+                image = expand2square(
+                    sample_image,
+                    tuple(int(x * 255) for x in self.image_processor.image_mean))
+            except:
+                image = expand2square(
+                    sample_image,
+                    tuple(int(x * 255) for x in [0.5,0.5,0.5]))
+            try:
+                image = self.image_processor.preprocess(
+                    image, return_tensors='pt')['pixel_values'][0]
+            except:
+                image = self.image_processor(
+                    images=image, return_tensors='pt')['pixel_values'][0]
+                # print(image.shape)
+                
             image = image.to(device)
             sample_input = DEFAULT_IMAGE_TOKEN + '\n' + sample_input
             inputs = (self.system + self.instruction).format(
@@ -218,7 +229,7 @@ class EvaluateChatHook(Hook):
             input_ids = torch.tensor(input_ids).to(device)
             sample_video = sample_video.permute(1,0,2,3).to(device)
             visual_outputs = model.visual_encoder(
-                sample_video, output_hidden_states=True)
+                sample_video.to(model.visual_encoder.dtype), output_hidden_states=True)
             pixel_values = model.projector(visual_outputs.hidden_states[
                 model.visual_select_layer][:, 1:])
 
@@ -286,21 +297,20 @@ class EvaluateChatHook(Hook):
 
         # Cast to inference mode
         model.activation_checkpointing_disable()
-        model.llm.config.use_cache = True
+        # model.llm.config.use_cache = True
         model.eval()
         print(self.evaluation_images, self.evaluation_inputs)
         print(self.evaluation_inputs_video)
-        # with torch.no_grad():
-        if self.evaluation_videos is not None:
-            self._eval_videos(runner, model, device, max_new_tokens,
-                            save_eval_output)
-        if self.evaluation_images is not None:
-            self._eval_images(runner, model, device, max_new_tokens,
-                            save_eval_output)
-
-        else:
-            self._eval_language(runner, model, device, max_new_tokens,
+        with torch.no_grad():
+            if self.evaluation_videos is not None:
+                self._eval_videos(runner, model, device, max_new_tokens,
                                 save_eval_output)
+            if self.evaluation_images is not None:
+                self._eval_images(runner, model, device, max_new_tokens,
+                                save_eval_output)
+            else:
+                self._eval_language(runner, model, device, max_new_tokens,
+                                    save_eval_output)
 
         # Cast to training mode
         if is_checkpointing:

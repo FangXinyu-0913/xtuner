@@ -98,9 +98,11 @@ class LLaVADataset(Dataset):
                     video_count+=1
             print(f'initial-image {image_count}, video {video_count}')
             for idx in range(len(json_video_data)):
-                if isinstance(json_video_data[idx]['id'], int):
+                if 'id' not in json_video_data[idx].keys():
+                    json_video_data[idx]['id'] = str(5000000 + idx) #temproray fix for
+                elif isinstance(json_video_data[idx]['id'], int):
                     json_video_data[idx]['id'] = str(json_video_data[idx]['id'])
-            print('success finish transform idx')
+            print('success finish transform idx') #need fix
             json_video_data = DatasetDict({'train': HFDataset.from_list(json_video_data)})
             print('success finish turn dataset into DatasetDict')
             self.text_data = process_hf_dataset(
@@ -128,8 +130,8 @@ class LLaVADataset(Dataset):
 
         self.pad_image_to_square = pad_image_to_square
 
-        self.batched_data = self.get_batched_image_OR_video()
-        print('batched_data shape:',len(self.batched_data))
+        # self.batched_data = self.get_batched_image_OR_video()
+        # print('batched_data shape:',len(self.batched_data))
 
     def get_batched_mix_image_video(self):
         #one batch might be: [image, image, video, video] or [image, ..., image] or [video, video, video, video]
@@ -220,83 +222,148 @@ class LLaVADataset(Dataset):
         length_list = []
         for data_dict in self.text_data:
             cur_len = len(data_dict['input_ids'])
-            if data_dict.get('image', None) is None:
-                cur_len = -cur_len
+            if not data_dict.get('image', None) and not data_dict.get('video', None): #only text
+                cur_len = -cur_len 
+            elif data_dict.get('video', None): #video
+                cur_len += 100000
             length_list.append(cur_len)
         return length_list
+    
+    def get_data_info(self, idx):
+        data = self.text_data[idx]
+        if data.get('image', None):
+            return 'image'
+        elif data.get('video', None):
+            return 'video'
+        else:
+            return 'text'
 
     @property
     def length(self):
-        return len(self.batched_data)
+        return len(self.text_data)
 
     def __len__(self):
-        return len(self.batched_data)
+        return len(self.text_data)
 
     def __getitem__(self, index):
 
-        batched_item = self.batched_data[index]
-        copyed_batched_item = copy.deepcopy(batched_item)
-        index_list = list(range(len(batched_item)))
-        for idx, (data_dict) in enumerate(copyed_batched_item):
+        text_item = self.text_data[index]
+        copyed_item = copy.deepcopy(text_item)
+        if copyed_item.get('image', None) is not None and copyed_item['image'] != '':
+            image_file = copyed_item['image']
+            image = Image.open(os.path.join(self.image_folder, image_file)).convert('RGB')
+            if self.pad_image_to_square:
+                try:
+                    image = expand2square(image,tuple(int(x * 255) for x in self.image_processor.image_mean))
+                except:
+                    image = expand2square(image,tuple(int(x * 255) for x in [0.5, 0.5, 0.5]))
             try:
-                if data_dict.get('image', None) is not None and data_dict['image'] != '':
-                    image_file = data_dict['image']
-                    # print('image:', image_file)
-                    image = Image.open(os.path.join(self.image_folder,
-                                                    image_file)).convert('RGB')
-                    if self.pad_image_to_square:
-                        image = expand2square(
-                            image,
-                            tuple(
-                                int(x * 255) for x in self.image_processor.image_mean))
-                    image = self.image_processor.preprocess(
-                        image, return_tensors='pt')['pixel_values'][0]
-                    data_dict['image_pixel_values'] = image #might cause OOM 
-                    # print(f'success get image')
-                elif data_dict.get('video', None) is not None and data_dict['video'] != '':
-                    video_file = data_dict['video']
-                    # print('video:', video_file)
-                    video_decode_backend = 'decord'
+                image = self.image_processor.preprocess(image, return_tensors='pt')['pixel_values'][0]
+            except:
+                image = self.image_processor(images=image, return_tensors='pt')['pixel_values'][0]
+            copyed_item['pixel_values'] = image
+        elif copyed_item.get('video', None) is not None and copyed_item['video'] != '':
+            video_file = copyed_item['video']
+            video_decode_backend = 'decord'
+            try:
+                video = load_and_transform_video(os.path.join(self.video_folder, video_file), 
+                                                    get_video_transform(video_decode_backend=video_decode_backend, num_frames=self.num_frames, frame_size=self.frame_size),
+                                                    video_decode_backend=video_decode_backend,
+                                                    num_frames=self.num_frames)
+            except:
+                try:
+                    dir, _ = os.path.splitext(video_file)
+                    video_probably_ext = ['.mp4','.mkv','.avi','.webm']
+                    for ext in video_probably_ext:
+                        if os.path.exists(os.path.join(self.video_folder, dir + ext)):
+                            video_file = dir+ext
+                            break
                     video = load_and_transform_video(os.path.join(self.video_folder, video_file), 
                                                         get_video_transform(video_decode_backend=video_decode_backend, num_frames=self.num_frames, frame_size=self.frame_size),
                                                         video_decode_backend=video_decode_backend,
                                                         num_frames=self.num_frames)
-                    # if self.frameNum_decision_sample:
-                        
-                    # elif self.framerateps_decision_sample:
-                    #     video, slice_len = _get_rawvideo_dec(os.path.join(self.video_folder, video_file), self.image_processor, max_frames=self.max_frames, video_framerate=self.video_framerate)
-                        
-                    # print(f'success get video')
-                    data_dict['video_pixel_values'] = video
-                    
-                else:
-                    crop_size = self.image_processor.crop_size
-                    data_dict['image_pixel_values'] = torch.zeros(3, crop_size['height'],
-                                                            crop_size['width'])
-            except Exception as e:
-                print(f'Error with {e}, idx {idx}')
-                index_list.remove(idx)
-                pass
-        
-        
-        if len([copyed_batched_item[i]for i in index_list]) == 0: #empty list, process it as only image
-            print(f'empty list from dataset.llava.getitem, process it as image')
-            print(copyed_batched_item)
-            instance_list = []
-            for idx, (data_dict) in enumerate(copyed_batched_item):
-                if data_dict.get('image', None) is not None and data_dict['image'] != '':
-                    instance_list.append(data_dict['image'])
-                elif data_dict.get('video', None) is not None and data_dict['video'] != '':
-                    instance_list.append(data_dict['video'])
+                except Exception as e:
+                    print(f'Error with {e}, idx {index}, data_dict {copyed_item}')
+                    try:
+                        crop_size = self.image_processor.crop_size
+                    except:
+                        crop_size = {'height':self.frame_size, 'width':self.frame_size}
 
+                    video = torch.zeros(3, crop_size['height'], crop_size['width'])
+
+            copyed_item['pixel_values'] = video
+        else:
+            try:
                 crop_size = self.image_processor.crop_size
-                data_dict['image_pixel_values'] = torch.zeros(3, crop_size['height'],
-                                                        crop_size['width'])
-                
-            print(instance_list)
-            return copyed_batched_item
+            except:
+                crop_size = {'height':self.frame_size, 'width':self.frame_size}
+            copyed_item['pixel_values'] = torch.zeros(3, crop_size['height'], crop_size['width'])
 
-        return [copyed_batched_item[i] for i in index_list]
+        return copyed_item
+    
+        # batched_item = self.text_data[index]
+        # copyed_batched_item = copy.deepcopy(batched_item)
+        # index_list = list(range(len(batched_item)))
+        # for idx, (data_dict) in enumerate(copyed_batched_item):
+        #     try:
+        #         if data_dict.get('image', None) is not None and data_dict['image'] != '':
+        #             image_file = data_dict['image']
+        #             # print('image:', image_file)
+        #             image = Image.open(os.path.join(self.image_folder,
+        #                                             image_file)).convert('RGB')
+        #             if self.pad_image_to_square:
+        #                 image = expand2square(
+        #                     image,
+        #                     tuple(
+        #                         int(x * 255) for x in self.image_processor.image_mean))
+        #             image = self.image_processor.preprocess(
+        #                 image, return_tensors='pt')['pixel_values'][0]
+        #             data_dict['image_pixel_values'] = image #might cause OOM 
+        #             # print(f'success get image')
+        #         elif data_dict.get('video', None) is not None and data_dict['video'] != '':
+        #             video_file = data_dict['video']
+        #             # print('video:', video_file)
+        #             video_decode_backend = 'decord'
+        #             video = load_and_transform_video(os.path.join(self.video_folder, video_file), 
+        #                                                 get_video_transform(video_decode_backend=video_decode_backend, num_frames=self.num_frames, frame_size=self.frame_size),
+        #                                                 video_decode_backend=video_decode_backend,
+        #                                                 num_frames=self.num_frames)
+        #             # if self.frameNum_decision_sample:
+                        
+        #             # elif self.framerateps_decision_sample:
+        #             #     video, slice_len = _get_rawvideo_dec(os.path.join(self.video_folder, video_file), self.image_processor, max_frames=self.max_frames, video_framerate=self.video_framerate)
+                        
+        #             # print(f'success get video')
+        #             data_dict['video_pixel_values'] = video
+                    
+        #         else:
+        #             crop_size = self.image_processor.crop_size
+        #             data_dict['image_pixel_values'] = torch.zeros(3, crop_size['height'],
+        #                                                     crop_size['width'])
+        #     except Exception as e:
+        #         print(f'Error with {e}, idx {idx}, data_dict {data_dict}')
+        #         index_list.remove(idx)
+        #         raise
+        
+        
+        # if len([copyed_batched_item[i]for i in index_list]) == 0: #empty list, process it as only image
+        #     print(f'empty list from dataset.llava.getitem, process it as image')
+        #     print(copyed_batched_item)
+        #     instance_list = []
+        #     for idx, (data_dict) in enumerate(copyed_batched_item):
+        #         if data_dict.get('image', None) is not None and data_dict['image'] != '':
+        #             instance_list.append(data_dict['image'])
+        #         elif data_dict.get('video', None) is not None and data_dict['video'] != '':
+        #             instance_list.append(data_dict['video'])
+
+        #         crop_size = self.image_processor.crop_size
+        #         data_dict['image_pixel_values'] = torch.zeros(3, crop_size['height'],
+        #                                                 crop_size['width'])
+                
+        #     print(instance_list)
+        #     return copyed_batched_item
+
+        # return [copyed_batched_item[i] for i in index_list]
 
         # try:
         # batch_size = 5

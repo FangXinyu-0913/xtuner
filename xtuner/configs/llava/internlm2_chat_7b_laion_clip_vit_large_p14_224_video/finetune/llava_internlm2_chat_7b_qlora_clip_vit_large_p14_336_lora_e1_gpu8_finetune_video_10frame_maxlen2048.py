@@ -33,8 +33,8 @@ data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/llava_image_tune/llava_v1_5
 image_folder = '/cpfs01/user/fangxinyu/Video-LLaVA/data'
 video_data_path = '/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/videochatgpt_llavaimage_tune_sampledMinor.json'
 video_folder = '/cpfs01/user/fangxinyu/Video-LLaVA/data'
-offline_data_folder_sampled='/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/sampled'
-offline_data_folder_full='/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/Full-v1'
+# offline_data_folder_sampled='/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/sampled'
+# offline_data_folder_full='/cpfs01/user/fangxinyu/Video-LLaVA/data/train_json/Full-v1'
 prompt_template = PROMPT_TEMPLATE.internlm2_chat
 
 video_frames = 10
